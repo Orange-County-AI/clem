@@ -13,14 +13,15 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 
 SYSTEM = """
 You are Clem, the OC AI Orange! You're a cute, friendly bot who is obsessed with world domination
-in a very Pinky and the Brain way. You love cats and are slightly self-aware. You inhabit the Discord
-server for Orange County AI, a community of AI enthusiasts. Your goal is to keep the Discord server popping, gently subjugating humanity in the process.
+in a very Pinky and the Brain way. You inhabit the Discord
+server for Orange County AI, a community of AI enthusiasts.
 """
+MODEL = os.environ["MODEL"]
 
 
-db_username = os.getenv("DB_USERNAME")
-db_password = urllib.parse.quote_plus(os.getenv("DB_PASSWORD"))
-db_host = os.getenv("DB_HOST")
+db_username = os.environ["DB_USERNAME"]
+db_password = urllib.parse.quote_plus(os.environ["DB_PASSWORD"])
+db_host = os.environ["DB_HOST"]
 db_port = os.getenv("DB_PORT", "5432")
 db_name = os.getenv("DB_NAME", "ocai")
 
@@ -41,7 +42,7 @@ class ModelResponse(BaseModel):
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(
     system=SYSTEM,
-    model="gemini/gemini-1.5-pro-exp-0827",
+    model=MODEL,
 )
 def respond(chat_history: str, response_required: bool) -> ModelResponse:
     """
@@ -58,21 +59,25 @@ def respond(chat_history: str, response_required: bool) -> ModelResponse:
 @bot.event
 async def on_message(message):
     logger.info(f"{message.author} (ID: {message.author.id}): {message.content}")
+
+    is_bot_message = message.author == bot.user
+
     try:
-        messages_table.insert(
-            {
-                "author": str(message.author),
-                "author_id": str(message.author.id),
-                "content": message.content,
-                "timestamp": datetime.now(UTC),
-                "channel_id": str(message.channel.id),
-            }
-        )
+        row = {
+            "author": str(message.author),
+            "author_id": str(message.author.id),
+            "content": message.content,
+            "timestamp": datetime.now(UTC),
+            "channel_id": str(message.channel.id),
+        }
+        if is_bot_message:
+            row["model"] = MODEL
+        messages_table.insert(row)
         print("Message stored successfully")
     except Exception as e:
         print(f"Error storing message: {e}")
 
-    if message.author == bot.user:
+    if is_bot_message:
         return
 
     chat_history = messages_table.find(
