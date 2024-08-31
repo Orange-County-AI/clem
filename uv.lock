@@ -180,17 +180,19 @@ dependencies = [
     { name = "promptic" },
     { name = "psycopg2-binary" },
     { name = "supabase" },
+    { name = "tenacity" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "dataset", specifier = ">=1.6.2" },
     { name = "discord-py", specifier = ">=2.4.0" },
-    { name = "google-generativeai" },
+    { name = "google-generativeai", specifier = ">=0.7.2" },
     { name = "loguru", specifier = ">=0.7.2" },
     { name = "promptic", specifier = ">=0.7.7" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
     { name = "supabase", specifier = ">=2.7.3" },
+    { name = "tenacity" },
 ]
 
 [[package]]
@@ -1171,6 +1173,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/6f/f6/06eefb1975e871b36abc8aebd6e370d441344ac4323d85cad6790709f75a/supafunc-0.5.1.tar.gz", hash = "sha256:1ae9dce6bd935939c561650e86abb676af9665ecf5d4ffc1c7ec3c4932c84334", size = 4087 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/93/ea/da0b3bd36ac21e91a7f3d43c3cc7884b79d96766cb07d1e55a83df0baadd/supafunc-0.5.1-py3-none-any.whl", hash = "sha256:b05e99a2b41270211a3f90ec843c04c5f27a5618f2d2d2eb8e07f41eb962a910", size = 6404 },
+]
+
+[[package]]
+name = "tenacity"
+version = "9.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/cd/94/91fccdb4b8110642462e653d5dcb27e7b674742ad68efd146367da7bdb10/tenacity-9.0.0.tar.gz", hash = "sha256:807f37ca97d62aa361264d497b0e31e92b8027044942bfa756160d908320d73b", size = 47421 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/cb/b86984bed139586d01532a587464b5805f12e397594f19f931c4c2fbfa61/tenacity-9.0.0-py3-none-any.whl", hash = "sha256:93de0c98785b27fcf659856aa9f54bfbd399e29969b0621bc7f762bd441b4539", size = 28169 },
 ]
 
 [[package]]
