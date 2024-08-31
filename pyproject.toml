@@ -8,7 +8,6 @@ dependencies = [
     "discord-py>=2.4.0",
     "promptic>=0.7.7",
     "loguru>=0.7.2",
-    "supabase>=2.7.3",
     "dataset>=1.6.2",
     "psycopg2-binary>=2.9.9",
     "google-generativeai>=0.7.2",
