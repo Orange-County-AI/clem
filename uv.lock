@@ -192,7 +192,7 @@ requires-dist = [
     { name = "promptic", specifier = ">=0.7.7" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
     { name = "supabase", specifier = ">=2.7.3" },
-    { name = "tenacity" },
+    { name = "tenacity", specifier = ">=9.0.0" },
 ]
 
 [[package]]
