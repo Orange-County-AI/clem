@@ -1,7 +1,7 @@
 """
 This is the main file for Clem, the Orange County AI bot.
 
-https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissions=1689938638141504&scope=bot
+https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissions=562952101107776&scope=bot
 """
 
 import os

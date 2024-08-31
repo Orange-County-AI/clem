@@ -44,4 +44,8 @@ Example: `@user ++` or `@user --`
 
 ## Invite Link
 
-[Invite Clem to your server](https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissions=1689938638141504&scope=bot)
+[Invite Clem to your server](https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissions=562952101107776&scope=bot)
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
