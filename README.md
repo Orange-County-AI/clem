@@ -4,9 +4,8 @@ Clem is a friendly AI assistant for the Orange County AI Discord server, with a 
 
 <img src="https://github.com/user-attachments/assets/76338b94-ae03-418d-af6d-a8e625706bd3" alt="HNMNG120WKDEJ6S Nov 2017" width="400px" style="border-radius: 10px;">
 
-## Invite Link
 
-[Invite Clem to your server](https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissions=562952101107776&scope=bot)
+## [Invite Clem to your server](https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissions=562952101107776&scope=bot)
 
 ## Features
 
