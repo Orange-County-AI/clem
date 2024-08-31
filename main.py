@@ -1,7 +1,14 @@
+"""
+This is the main file for Clem, the Orange County AI bot.
+
+https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissions=1689938638141504&scope=bot
+"""
+
 import os
 import re
 import urllib.parse
 from datetime import UTC, datetime
+from discord.ext.commands import Context
 
 import dataset
 import discord
@@ -45,8 +52,16 @@ class ModelResponse(BaseModel):
 def clem_disabled(channel_id: str) -> bool:
     channels_table = db["channels"]
     channel = channels_table.find_one(channel_id=channel_id)
-    return channel and channel["disabled"]
+    return channel and channel.get("disabled", False)
 
+def karma_only(channel_id: str) -> bool:
+    channels_table = db["channels"]
+    channel = channels_table.find_one(channel_id=channel_id)
+    return channel and channel.get("karma_only", False)
+
+async def check_is_command_message(bot: commands.Bot, message: discord.Message) -> bool:
+    ctx: Context = await bot.get_context(message)
+    return ctx.valid
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(system=SYSTEM, model=MODEL)
@@ -82,9 +97,13 @@ async def on_message(message):
 
     channel_id = str(message.channel.id)
 
+    clem_is_disabled = clem_disabled(channel_id)
+    is_karma_only = karma_only(channel_id)
+    is_command_message = await check_is_command_message(bot, message)
+
     karma_changes = process_karma(message.content, message.mentions)
 
-    if karma_changes:
+    if karma_changes and not clem_is_disabled:
         for user, change in karma_changes.items():
             new_karma = update_karma(user.id, change)
             karma_response = respond_to_karma(user.name, change, new_karma)
@@ -107,7 +126,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-    if is_bot_message or clem_disabled(channel_id):
+    if is_bot_message or clem_is_disabled or is_karma_only or is_command_message:
         return
 
     chat_history = messages_table.find(
@@ -160,36 +179,42 @@ def update_karma(user_id: int, change: int) -> int:
     return new_karma
 
 
-@bot.command()
-@commands.has_permissions(manage_channels=True)
-async def disable_clem(ctx):
+@bot.hybrid_command(
+    description="Toggle Clem's automatic responses in the current channel."
+)
+async def toggle_clem(ctx):
     channel_id = str(ctx.channel.id)
     channels_table = db["channels"]
 
     channel = channels_table.find_one(channel_id=channel_id)
-    if channel and channel["disabled"]:
-        await ctx.send("Clem is already disabled in this channel.")
-    else:
-        channels_table.upsert(
-            dict(channel_id=channel_id, disabled=True), ["channel_id"]
-        )
-        await ctx.send("Clem has been disabled in this channel.")
+    current_state = channel and channel.get("disabled", False)
+    new_state = not current_state
+
+    channels_table.upsert(
+        dict(channel_id=channel_id, disabled=new_state), ["channel_id"]
+    )
+
+    status = "disabled" if new_state else "enabled"
+    await ctx.send(f"Clem has been {status} in this channel.")
 
 
-@bot.command()
-@commands.has_permissions(manage_channels=True)
-async def enable_clem(ctx):
+@bot.hybrid_command(
+    description="Toggle Clem to only respond to karma changes in the current channel."
+)
+async def toggle_karma_only(ctx):
     channel_id = str(ctx.channel.id)
     channels_table = db["channels"]
 
     channel = channels_table.find_one(channel_id=channel_id)
-    if channel and not channel["disabled"]:
-        await ctx.send("Clem is already enabled in this channel.")
-    else:
-        channels_table.upsert(
-            dict(channel_id=channel_id, disabled=False), ["channel_id"]
-        )
-        await ctx.send("Clem has been enabled in this channel.")
+    current_state = channel and channel.get("karma_only", False)
+    new_state = not current_state
+
+    channels_table.upsert(
+        dict(channel_id=channel_id, karma_only=new_state), ["channel_id"]
+    )
+
+    status = "enabled" if new_state else "disabled"
+    await ctx.send(f"Karma-only mode has been {status} in this channel.")
 
 
 bot.run(os.environ["BOT_TOKEN"])
