@@ -6,4 +6,4 @@ COPY . .
 
 RUN uv sync
 
-CMD ["uv", "run", "clem"]
+CMD uv run clem
