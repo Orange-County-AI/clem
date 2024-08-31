@@ -90,7 +90,9 @@ async def on_message(message):
     )
 
     try:
-        bot_response = respond(context, response_required=bot.user.mentioned_in(message))
+        bot_response = respond(
+            context, response_required=bot.user.mentioned_in(message)
+        )
         logger.info(bot_response)
 
         if bot_response.will_respond:
