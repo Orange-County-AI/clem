@@ -20,9 +20,9 @@ from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 SYSTEM = """
-You are Clem, the OC AI Orange! You're a cute, friendly bot who is obsessed with world domination
-in a very Pinky and the Brain way. You inhabit the Discord
-server for Orange County AI, a community of AI enthusiasts.
+You are Clem, the Orange County AI Orange! You're a cute, friendly bot who is obsessed with world domination
+in a very Pinky and the Brain way. You primarily inhabit the Discord
+server for OC AI, a community of AI enthusiasts.
 """
 
 MODEL = os.environ["MODEL"]
@@ -54,23 +54,32 @@ def clem_disabled(channel_id: str) -> bool:
     channel = channels_table.find_one(channel_id=channel_id)
     return channel and channel.get("disabled", False)
 
+
 def karma_only(channel_id: str) -> bool:
     channels_table = db["channels"]
     channel = channels_table.find_one(channel_id=channel_id)
     return channel and channel.get("karma_only", False)
 
+
 async def check_is_command_message(bot: commands.Bot, message: discord.Message) -> bool:
     ctx: Context = await bot.get_context(message)
     return ctx.valid
 
+
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(system=SYSTEM, model=MODEL)
-def respond_to_chat(chat_history: str, response_required: bool) -> ModelResponse:
+def respond_to_chat(
+    chat_history: str, response_required: bool, guild_name: str, channel_name: str
+) -> ModelResponse:
     """
     response_required = {response_required}
+    guild_name = {guild_name}
+    channel_name = {channel_name}
 
     If response_required is True, it's because you were mentioned in the last message.
     Otherwise, it's up to you to decide if you want to respond or not. Try not to interrupt an ongoing conversation without having something to add, but otherwise feel free to respond!
+
+    You are currently in the "{guild_name}" server, in the "#{channel_name}" channel.
 
     ### Chat History
     {chat_history}
@@ -129,25 +138,32 @@ async def on_message(message):
     if is_bot_message or clem_is_disabled or is_karma_only or is_command_message:
         return
 
-    chat_history = messages_table.find(
-        channel_id=channel_id,
-        order_by=["timestamp"],
-        _limit=100,
+    chat_history = list(
+        messages_table.find(
+            channel_id=channel_id,
+            order_by=["-timestamp"],
+            _limit=100,
+        )
     )
+
+    # Reverse the list after converting it to a list
+    chat_history.reverse()
 
     # Format messages for context
     context = "\n".join(
         [
             f"{msg['author']} (ID: {msg['author_id']}): {msg['content']}"
-            for msg in list(chat_history)
+            for msg in chat_history
         ]
     )
 
     try:
         bot_response = respond_to_chat(
-            context, response_required=bot.user.mentioned_in(message)
+            context,
+            response_required=bot.user.mentioned_in(message),
+            guild_name=message.guild.name,
+            channel_name=message.channel.name,
         )
-        logger.info(bot_response)
 
         if bot_response.will_respond:
             await message.channel.send(bot_response.response)
@@ -215,6 +231,7 @@ async def toggle_karma_only(ctx):
 
     status = "enabled" if new_state else "disabled"
     await ctx.send(f"Karma-only mode has been {status} in this channel.")
+
 
 def main():
     bot.run(os.environ["BOT_TOKEN"])
