@@ -8,6 +8,7 @@ from discord.ext import commands
 from loguru import logger
 from promptic import llm
 from pydantic import BaseModel
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 SYSTEM = """
 You are Clem, the OC AI Orange! You're a cute, friendly bot who is obsessed with world domination
@@ -36,6 +37,7 @@ class ModelResponse(BaseModel):
     response: str = ""
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(
     system=SYSTEM,
     model="gemini/gemini-1.5-pro-exp-0827",
@@ -86,12 +88,14 @@ async def on_message(message):
         ]
     )
 
-    bot_response = respond(context, response_required=bot.user.mentioned_in(message))
+    try:
+        bot_response = respond(context, response_required=bot.user.mentioned_in(message))
+        logger.info(bot_response)
 
-    logger.info(bot_response)
-
-    if bot_response.will_respond:
-        await message.channel.send(bot_response.response)
+        if bot_response.will_respond:
+            await message.channel.send(bot_response.response)
+    except Exception as e:
+        logger.error(f"Error in respond function after 3 attempts: {e}")
 
     await bot.process_commands(message)
 
