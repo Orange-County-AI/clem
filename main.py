@@ -17,6 +17,7 @@ You are Clem, the OC AI Orange! You're a cute, friendly bot who is obsessed with
 in a very Pinky and the Brain way. You inhabit the Discord
 server for Orange County AI, a community of AI enthusiasts.
 """
+
 MODEL = os.environ["MODEL"]
 
 
@@ -39,6 +40,12 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 class ModelResponse(BaseModel):
     will_respond: bool
     response: str = ""
+
+
+def clem_disabled(channel_id: str) -> bool:
+    channels_table = db["channels"]
+    channel = channels_table.find_one(channel_id=channel_id)
+    return channel and channel["disabled"]
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
@@ -73,15 +80,15 @@ async def on_message(message):
 
     is_bot_message = message.author == bot.user
 
+    channel_id = str(message.channel.id)
+
     karma_changes = process_karma(message.content, message.mentions)
 
     if karma_changes:
         for user, change in karma_changes.items():
             new_karma = update_karma(user.id, change)
             karma_response = respond_to_karma(user.name, change, new_karma)
-            return await message.channel.send(
-                karma_response
-            )
+            return await message.channel.send(karma_response)
 
     try:
         row = {
@@ -89,7 +96,7 @@ async def on_message(message):
             "author_id": str(message.author.id),
             "content": message.content,
             "timestamp": datetime.now(UTC),
-            "channel_id": str(message.channel.id),
+            "channel_id": channel_id,
         }
         if is_bot_message:
             row["model"] = MODEL
@@ -98,11 +105,13 @@ async def on_message(message):
     except Exception as e:
         print(f"Error storing message: {e}")
 
-    if is_bot_message:
+    await bot.process_commands(message)
+
+    if is_bot_message or clem_disabled(channel_id):
         return
 
     chat_history = messages_table.find(
-        channel_id=str(message.channel.id),
+        channel_id=channel_id,
         order_by=["timestamp"],
         _limit=100,
     )
@@ -126,17 +135,15 @@ async def on_message(message):
     except Exception as e:
         logger.error(f"Error in respond function after 3 attempts: {e}")
 
-    await bot.process_commands(message)
-
 
 def process_karma(content: str, mentions: list[Member]) -> dict[Member, int]:
     karma_changes = {}
     for mention in mentions:
-        pattern = rf'<@!?{mention.id}>\s+([+-]+)'  # Capture consecutive + or - after mention and whitespace
+        pattern = rf"<@!?{mention.id}>\s+([+-]+)"  # Capture consecutive + or - after mention and whitespace
         matches = re.findall(pattern, content)
         for match in matches:
-            change = len(match) // 2  # Integer division by 2
-            if match[0] == '-':
+            change = len(match) // 2
+            if match[0] == "-":
                 change = -change  # Make it negative for minus signs
             karma_changes[mention] = karma_changes.get(mention, 0) + change
     return karma_changes
@@ -151,6 +158,38 @@ def update_karma(user_id: int, change: int) -> int:
         new_karma = change
         karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
     return new_karma
+
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def disable_clem(ctx):
+    channel_id = str(ctx.channel.id)
+    channels_table = db["channels"]
+
+    channel = channels_table.find_one(channel_id=channel_id)
+    if channel and channel["disabled"]:
+        await ctx.send("Clem is already disabled in this channel.")
+    else:
+        channels_table.upsert(
+            dict(channel_id=channel_id, disabled=True), ["channel_id"]
+        )
+        await ctx.send("Clem has been disabled in this channel.")
+
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def enable_clem(ctx):
+    channel_id = str(ctx.channel.id)
+    channels_table = db["channels"]
+
+    channel = channels_table.find_one(channel_id=channel_id)
+    if channel and not channel["disabled"]:
+        await ctx.send("Clem is already enabled in this channel.")
+    else:
+        channels_table.upsert(
+            dict(channel_id=channel_id, disabled=False), ["channel_id"]
+        )
+        await ctx.send("Clem has been enabled in this channel.")
 
 
 bot.run(os.environ["BOT_TOKEN"])
