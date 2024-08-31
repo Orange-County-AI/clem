@@ -1,15 +1,16 @@
 import os
+import re
 import urllib.parse
 from datetime import UTC, datetime
 
 import dataset
 import discord
+from discord import Member
 from discord.ext import commands
 from loguru import logger
 from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
-
 
 SYSTEM = """
 You are Clem, the OC AI Orange! You're a cute, friendly bot who is obsessed with world domination
@@ -26,10 +27,11 @@ db_port = os.getenv("DB_PORT", "5432")
 db_name = os.getenv("DB_NAME", "ocai")
 
 db_url = f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+
 db = dataset.connect(db_url)
 
-# Get the messages table
 messages_table = db["messages"]
+karma_table = db["karma"]
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
@@ -40,11 +42,8 @@ class ModelResponse(BaseModel):
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
-@llm(
-    system=SYSTEM,
-    model=MODEL,
-)
-def respond(chat_history: str, response_required: bool) -> ModelResponse:
+@llm(system=SYSTEM, model=MODEL)
+def respond_to_chat(chat_history: str, response_required: bool) -> ModelResponse:
     """
     response_required = {response_required}
 
@@ -56,11 +55,33 @@ def respond(chat_history: str, response_required: bool) -> ModelResponse:
     """
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@llm(system=SYSTEM, model=MODEL)
+def respond_to_karma(username: str, change: int, total: int):
+    """
+    Announce the change in karma to the chat in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.
+
+    username: {username}
+    change: {change}
+    total: {total}
+    """
+
+
 @bot.event
 async def on_message(message):
     logger.info(f"{message.author} (ID: {message.author.id}): {message.content}")
 
     is_bot_message = message.author == bot.user
+
+    karma_changes = process_karma(message.content, message.mentions)
+
+    if karma_changes:
+        for user, change in karma_changes.items():
+            new_karma = update_karma(user.id, change)
+            karma_response = respond_to_karma(user.name, change, new_karma)
+            return await message.channel.send(
+                karma_response
+            )
 
     try:
         row = {
@@ -95,7 +116,7 @@ async def on_message(message):
     )
 
     try:
-        bot_response = respond(
+        bot_response = respond_to_chat(
             context, response_required=bot.user.mentioned_in(message)
         )
         logger.info(bot_response)
@@ -108,4 +129,28 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-bot.run(os.getenv("BOT_TOKEN"))
+def process_karma(content: str, mentions: list[Member]) -> dict[Member, int]:
+    karma_changes = {}
+    for mention in mentions:
+        pattern = rf'<@!?{mention.id}>\s+([+-]+)'  # Capture consecutive + or - after mention and whitespace
+        matches = re.findall(pattern, content)
+        for match in matches:
+            change = len(match) // 2  # Integer division by 2
+            if match[0] == '-':
+                change = -change  # Make it negative for minus signs
+            karma_changes[mention] = karma_changes.get(mention, 0) + change
+    return karma_changes
+
+
+def update_karma(user_id: int, change: int) -> int:
+    user_karma = karma_table.find_one(user_id=str(user_id))
+    if user_karma:
+        new_karma = user_karma["karma"] + change
+        karma_table.update(dict(user_id=str(user_id), karma=new_karma), ["user_id"])
+    else:
+        new_karma = change
+        karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
+    return new_karma
+
+
+bot.run(os.environ["BOT_TOKEN"])
