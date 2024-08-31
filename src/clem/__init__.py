@@ -9,6 +9,7 @@ import re
 import urllib.parse
 from datetime import UTC, datetime
 from discord.ext.commands import Context
+from discord import app_commands
 
 import dataset
 import discord
@@ -34,7 +35,9 @@ db_host = os.environ["DB_HOST"]
 db_port = os.getenv("DB_PORT", "5432")
 db_name = os.getenv("DB_NAME", "ocai")
 
-db_url = f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+db_url = (
+    f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+)
 
 db = dataset.connect(db_url)
 
@@ -61,7 +64,9 @@ def karma_only(channel_id: str) -> bool:
     return channel and channel.get("karma_only", False)
 
 
-async def check_is_command_message(bot: commands.Bot, message: discord.Message) -> bool:
+async def check_is_command_message(
+    bot: commands.Bot, message: discord.Message
+) -> bool:
     ctx: Context = await bot.get_context(message)
     return ctx.valid
 
@@ -69,7 +74,10 @@ async def check_is_command_message(bot: commands.Bot, message: discord.Message) 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(system=SYSTEM, model=MODEL)
 def respond_to_chat(
-    chat_history: str, response_required: bool, guild_name: str, channel_name: str
+    chat_history: str,
+    response_required: bool,
+    guild_name: str,
+    channel_name: str,
 ) -> ModelResponse:
     """
     response_required = {response_required}
@@ -100,7 +108,9 @@ def respond_to_karma(username: str, change: int, total: int):
 
 @bot.event
 async def on_message(message):
-    logger.info(f"{message.author} (ID: {message.author.id}): {message.content}")
+    logger.info(
+        f"{message.author} (ID: {message.author.id}): {message.content}"
+    )
 
     is_bot_message = message.author == bot.user
 
@@ -135,7 +145,12 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-    if is_bot_message or clem_is_disabled or is_karma_only or is_command_message:
+    if (
+        is_bot_message
+        or clem_is_disabled
+        or is_karma_only
+        or is_command_message
+    ):
         return
 
     chat_history = list(
@@ -188,11 +203,24 @@ def update_karma(user_id: int, change: int) -> int:
     user_karma = karma_table.find_one(user_id=str(user_id))
     if user_karma:
         new_karma = user_karma["karma"] + change
-        karma_table.update(dict(user_id=str(user_id), karma=new_karma), ["user_id"])
+        karma_table.update(
+            dict(user_id=str(user_id), karma=new_karma), ["user_id"]
+        )
     else:
         new_karma = change
         karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
     return new_karma
+
+
+@bot.event
+async def on_ready():
+    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    logger.info("Syncing commands...")
+    try:
+        synced = await bot.tree.sync()
+        logger.info(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        logger.error(f"Failed to sync commands: {e}")
 
 
 @bot.hybrid_command(
