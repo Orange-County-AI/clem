@@ -129,10 +129,16 @@ async def on_message(message):
             return await message.channel.send(karma_response)
 
     try:
+        # Replace user mentions with their names
+        content = message.content
+        for user in message.mentions:
+            content = content.replace(f"<@{user.id}>", f"@{user.name}")
+            content = content.replace(f"<@!{user.id}>", f"@{user.name}")
+
         row = {
             "author": str(message.author),
             "author_id": str(message.author.id),
-            "content": message.content,
+            "content": content,
             "timestamp": datetime.now(UTC),
             "channel_id": channel_id,
         }
@@ -161,7 +167,6 @@ async def on_message(message):
         )
     )
 
-    # Reverse the list after converting it to a list
     chat_history.reverse()
 
     # Format messages for context
