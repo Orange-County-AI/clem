@@ -9,7 +9,6 @@ import re
 import urllib.parse
 from datetime import UTC, datetime
 from discord.ext.commands import Context
-from discord import app_commands
 
 import dataset
 import discord
