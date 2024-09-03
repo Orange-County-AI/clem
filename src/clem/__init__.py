@@ -18,6 +18,14 @@ from loguru import logger
 from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
+from enum import IntEnum
+
+
+class VerbosityLevel(IntEnum):
+    KARMA_ONLY = 1
+    MENTIONED_OR_RELEVANT = 2
+    UNRESTRICTED = 3
+
 
 SYSTEM = """
 You are Clem, the Orange County AI Orange! You're a cute, friendly bot who is obsessed with world domination
@@ -34,9 +42,7 @@ db_host = os.environ["DB_HOST"]
 db_port = os.getenv("DB_PORT", "5432")
 db_name = os.getenv("DB_NAME", "ocai")
 
-db_url = (
-    f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
-)
+db_url = f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
 
 db = dataset.connect(db_url)
 
@@ -60,12 +66,26 @@ def clem_disabled(channel_id: str) -> bool:
 def karma_only(channel_id: str) -> bool:
     channels_table = db["channels"]
     channel = channels_table.find_one(channel_id=channel_id)
-    return channel and channel.get("karma_only", False)
+    return (
+        channel
+        and channel.get("verbosity_level", VerbosityLevel.MENTIONED_OR_RELEVANT)
+        == VerbosityLevel.KARMA_ONLY
+    )
 
 
-async def check_is_command_message(
-    bot: commands.Bot, message: discord.Message
-) -> bool:
+def get_verbosity_level(channel_id: str) -> VerbosityLevel:
+    channels_table = db["channels"]
+    channel = channels_table.find_one(channel_id=channel_id)
+    return (
+        VerbosityLevel(
+            channel.get("verbosity_level", VerbosityLevel.MENTIONED_OR_RELEVANT)
+        )
+        if channel
+        else VerbosityLevel.MENTIONED_OR_RELEVANT
+    )
+
+
+async def check_is_command_message(bot: commands.Bot, message: discord.Message) -> bool:
     ctx: Context = await bot.get_context(message)
     return ctx.valid
 
@@ -74,17 +94,19 @@ async def check_is_command_message(
 @llm(system=SYSTEM, model=MODEL)
 def respond_to_chat(
     chat_history: str,
-    response_required: bool,
     guild_name: str,
     channel_name: str,
+    verbosity_level: VerbosityLevel,
 ) -> ModelResponse:
     """
-    response_required = {response_required}
     guild_name = {guild_name}
     channel_name = {channel_name}
+    verbosity_level = {verbosity_level}
 
-    If response_required is True, it's because you were mentioned in the last message.
-    Otherwise, it's up to you to decide if you want to respond or not. Try not to interrupt an ongoing conversation without having something to add, but otherwise feel free to respond!
+    Your response should adhere to the following verbosity levels:
+    - KARMA_ONLY (1): Do not respond at all. Return will_respond = False.
+    - MENTIONED_OR_RELEVANT (2): Only respond if you were mentioned (response_required is True) or if you have something highly relevant to add to the conversation.
+    - UNRESTRICTED (3): You can respond freely, as you normally would.
 
     You are currently in the "{guild_name}" server, in the "#{channel_name}" channel.
 
@@ -107,9 +129,7 @@ def respond_to_karma(username: str, change: int, total: int):
 
 @bot.event
 async def on_message(message):
-    logger.info(
-        f"{message.author} (ID: {message.author.id}): {message.content}"
-    )
+    logger.info(f"{message.author} (ID: {message.author.id}): {message.content}")
 
     is_bot_message = message.author == bot.user
 
@@ -150,12 +170,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-    if (
-        is_bot_message
-        or clem_is_disabled
-        or is_karma_only
-        or is_command_message
-    ):
+    if is_bot_message or clem_is_disabled or is_karma_only or is_command_message:
         return
 
     chat_history = list(
@@ -179,12 +194,18 @@ async def on_message(message):
     try:
         bot_response = respond_to_chat(
             context,
-            response_required=bot.user.mentioned_in(message),
             guild_name=message.guild.name,
             channel_name=message.channel.name,
+            verbosity_level=get_verbosity_level(channel_id),
         )
 
-        if bot_response.will_respond:
+        if bot_response.will_respond and (
+            get_verbosity_level(channel_id) == VerbosityLevel.UNRESTRICTED
+            or (
+                get_verbosity_level(channel_id) == VerbosityLevel.MENTIONED_OR_RELEVANT
+                and (bot.user.mentioned_in(message) or bot_response.response.strip())
+            )
+        ):
             await message.channel.send(bot_response.response)
     except Exception as e:
         logger.error(f"Error in respond function after 3 attempts: {e}")
@@ -207,9 +228,7 @@ def update_karma(user_id: int, change: int) -> int:
     user_karma = karma_table.find_one(user_id=str(user_id))
     if user_karma:
         new_karma = user_karma["karma"] + change
-        karma_table.update(
-            dict(user_id=str(user_id), karma=new_karma), ["user_id"]
-        )
+        karma_table.update(dict(user_id=str(user_id), karma=new_karma), ["user_id"])
     else:
         new_karma = change
         karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
@@ -246,24 +265,29 @@ async def toggle_clem(ctx):
     await ctx.send(f"Clem has been {status} in this channel.")
 
 
-@bot.hybrid_command(
-    description="Toggle Clem to only respond to karma changes in the current channel."
-)
-async def toggle_karma_only(ctx):
+def main():
+    bot.run(os.environ["BOT_TOKEN"])
+
+
+@bot.hybrid_command(description="Set Clem's verbosity level in the current channel.")
+async def set_verbosity(ctx, level: int):
+    if level not in [1, 2, 3]:
+        await ctx.send("Invalid verbosity level. Please choose 1, 2, or 3.")
+        return
+
     channel_id = str(ctx.channel.id)
     channels_table = db["channels"]
 
-    channel = channels_table.find_one(channel_id=channel_id)
-    current_state = channel and channel.get("karma_only", False)
-    new_state = not current_state
-
     channels_table.upsert(
-        dict(channel_id=channel_id, karma_only=new_state), ["channel_id"]
+        dict(channel_id=channel_id, verbosity_level=level), ["channel_id"]
     )
 
-    status = "enabled" if new_state else "disabled"
-    await ctx.send(f"Karma-only mode has been {status} in this channel.")
+    verbosity_descriptions = {
+        1: "Karma changes only",
+        2: "Mentions and relevant responses",
+        3: "Unrestricted",
+    }
 
-
-def main():
-    bot.run(os.environ["BOT_TOKEN"])
+    await ctx.send(
+        f"Clem's verbosity level has been set to {level} ({verbosity_descriptions[level]}) in this channel."
+    )
