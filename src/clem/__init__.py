@@ -145,7 +145,8 @@ async def on_message(message):
         for user, change in karma_changes.items():
             new_karma = update_karma(user.id, change)
             karma_response = respond_to_karma(user.name, change, new_karma)
-            return await message.channel.send(karma_response)
+            await message.channel.send(karma_response)
+        return
 
     try:
         # Replace user mentions with their names
