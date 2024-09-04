@@ -58,7 +58,6 @@ class VerbosityLevel(IntEnum):
 
 
 class ModelResponse(BaseModel):
-    will_respond: bool
     response: str = ""
 
 
@@ -103,17 +102,10 @@ def respond_to_chat(
     chat_history: str,
     guild_name: str,
     channel_name: str,
-    verbosity_level: VerbosityLevel,
-) -> ModelResponse:
+):
     """
     guild_name = {guild_name}
     channel_name = {channel_name}
-    verbosity_level = {verbosity_level}
-
-    Your response should adhere to the following verbosity levels:
-    - KARMA_ONLY (1): Do not respond at all.
-    - MENTIONED (2): Only respond if you were mentioned
-    - UNRESTRICTED (3): You can respond freely, as you normally would.
 
     You are currently in the "{guild_name}" server, in the "#{channel_name}" channel.
 
@@ -237,30 +229,24 @@ async def on_message(message):
     )
 
     verbosity_level = get_verbosity_level(channel_id)
+    should_respond = False
+
+    if verbosity_level == VerbosityLevel.UNRESTRICTED:
+        should_respond = True
+    elif verbosity_level == VerbosityLevel.MENTIONED:
+        should_respond = (
+            bot.user.mentioned_in(message) or "clem" in message.content.lower()
+        )
+    # For KARMA_ONLY, should_respond remains False
 
     try:
-        bot_response = respond_to_chat(
-            context,
-            guild_name=message.guild.name,
-            channel_name=message.channel.name,
-            verbosity_level=verbosity_level,
-        )
-
-        logger.info(f"{bot_response.will_respond = }")
-        logger.info(
-            f"{verbosity_level = } {message.guild.name = } {message.channel.name = }"
-        )
-
-        if bot_response.will_respond and (
-            verbosity_level == VerbosityLevel.UNRESTRICTED
-            or (
-                verbosity_level == VerbosityLevel.MENTIONED
-                and (
-                    bot.user.mentioned_in(message)
-                    or bot_response.response.strip()
-                )
+        if should_respond:
+            bot_response = respond_to_chat(
+                context,
+                guild_name=message.guild.name,
+                channel_name=message.channel.name,
             )
-        ):
+
             # Check if the response is different from the last user message and the last bot message
             last_user_message = next(
                 (
@@ -281,13 +267,12 @@ async def on_message(message):
 
             if (
                 not last_user_message
-                or last_user_message["content"].lower()
-                != bot_response.response.lower()
+                or last_user_message["content"].lower() != bot_response.lower()
             ) and (
                 not last_bot_message
-                or last_bot_message["content"] != bot_response.response
+                or last_bot_message["content"] != bot_response
             ):
-                await message.channel.send(bot_response.response)
+                await message.channel.send(bot_response)
             else:
                 logger.info("Duplicate or repetitive message prevented")
     except Exception as e:
