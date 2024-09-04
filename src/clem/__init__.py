@@ -201,6 +201,7 @@ async def on_message(message):
         )
 
         logger.info(f"{bot_response.will_respond = }")
+        logger.info(f"Verbosity level: {get_verbosity_level(channel_id)} for guild '{message.guild.name}', channel '#{message.channel.name}'")
 
         if bot_response.will_respond and (
             get_verbosity_level(channel_id) == VerbosityLevel.UNRESTRICTED
