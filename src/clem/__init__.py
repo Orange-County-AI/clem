@@ -237,23 +237,25 @@ async def on_message(message):
         ]
     )
 
+    verbosity_level = get_verbosity_level(channel_id)
+
     try:
         bot_response = respond_to_chat(
             context,
             guild_name=message.guild.name,
             channel_name=message.channel.name,
-            verbosity_level=get_verbosity_level(channel_id),
+            verbosity_level=verbosity_level,
         )
 
         logger.info(f"{bot_response.will_respond = }")
         logger.info(
-            f"Verbosity level: {get_verbosity_level(channel_id)} for guild '{message.guild.name}', channel '#{message.channel.name}'"
+            f"{verbosity_level = } {message.guild.name = } {message.channel.name = }"
         )
 
         if bot_response.will_respond and (
-            get_verbosity_level(channel_id) == VerbosityLevel.UNRESTRICTED
+            verbosity_level == VerbosityLevel.UNRESTRICTED
             or (
-                get_verbosity_level(channel_id) == VerbosityLevel.MENTIONED
+                verbosity_level == VerbosityLevel.MENTIONED
                 and (
                     bot.user.mentioned_in(message)
                     or bot_response.response.strip()
