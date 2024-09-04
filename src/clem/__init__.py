@@ -206,7 +206,13 @@ async def on_message(message):
                 and (bot.user.mentioned_in(message) or bot_response.response.strip())
             )
         ):
-            await message.channel.send(bot_response.response)
+            # Check if the response is different from the last sent message
+            last_bot_message = next((msg for msg in reversed(chat_history) if msg['author_id'] == str(bot.user.id)), None)
+            
+            if not last_bot_message or last_bot_message['content'] != bot_response.response:
+                await message.channel.send(bot_response.response)
+            else:
+                logger.info("Duplicate message prevented")
     except Exception as e:
         logger.error(f"Error in respond function after 3 attempts: {e}")
 
