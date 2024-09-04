@@ -343,3 +343,20 @@ async def set_verbosity(ctx, level: int):
     await ctx.send(
         f"Clem's verbosity level has been set to {level} ({verbosity_descriptions[level]}) in this channel."
     )
+
+
+@bot.hybrid_command(
+    description="Reset the chat history for the current channel."
+)
+async def reset_chat(ctx):
+    channel_id = str(ctx.channel.id)
+
+    try:
+        messages_table.delete(channel_id=channel_id)
+        await ctx.send("Chat history for this channel has been reset.")
+        logger.info(f"Chat history reset for channel {channel_id}")
+    except Exception as e:
+        await ctx.send("An error occurred while resetting the chat history.")
+        logger.error(
+            f"Error resetting chat history for channel {channel_id}: {e}"
+        )
