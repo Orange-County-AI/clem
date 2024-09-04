@@ -96,8 +96,8 @@ async def check_is_command_message(
     return ctx.valid
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(1), max_tokens=500)
-@llm(system=SYSTEM, model=MODEL)
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@llm(system=SYSTEM, model=MODEL, max_tokens=500)
 def respond_to_chat(
     chat_history: str,
     guild_name: str,
