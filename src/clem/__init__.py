@@ -172,15 +172,14 @@ async def on_message(message):
         return
 
     try:
-        # Replace user mentions with their names
+        # Replace user mentions with their names and remove ID information
         content = message.content
         for user in message.mentions:
             content = content.replace(f"<@{user.id}>", f"@{user.name}")
             content = content.replace(f"<@!{user.id}>", f"@{user.name}")
 
         row = {
-            "author": str(message.author),
-            "author_id": str(message.author.id),
+            "author": message.author.name,  # Store only the username
             "content": content,
             "timestamp": datetime.now(UTC),
             "channel_id": channel_id,
@@ -220,12 +219,9 @@ async def on_message(message):
 
     chat_history.reverse()
 
-    # Format messages for context
+    # Format messages for context, using only usernames
     context = "\n".join(
-        [
-            f"{msg['author']} (ID: {msg['author_id']}): {msg['content']}"
-            for msg in chat_history
-        ]
+        [f"{msg['author']}: {msg['content']}" for msg in chat_history]
     )
 
     verbosity_level = get_verbosity_level(channel_id)
@@ -252,7 +248,7 @@ async def on_message(message):
                 (
                     msg
                     for msg in reversed(chat_history)
-                    if msg["author_id"] != str(bot.user.id)
+                    if msg["author"] != bot.user.name
                 ),
                 None,
             )
@@ -260,7 +256,7 @@ async def on_message(message):
                 (
                     msg
                     for msg in reversed(chat_history)
-                    if msg["author_id"] == str(bot.user.id)
+                    if msg["author"] == bot.user.name
                 ),
                 None,
             )
