@@ -21,12 +21,6 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 from enum import IntEnum
 
 
-class VerbosityLevel(IntEnum):
-    KARMA_ONLY = 1
-    MENTIONED = 2
-    UNRESTRICTED = 3
-
-
 SYSTEM = """
 You are Clem, the Orange County AI Orange! You wear thick nerdy glasses and sport a single green leaf on your stem.
 
@@ -40,22 +34,27 @@ server for OC AI, a community of AI enthusiasts.
 MODEL = os.environ["MODEL"]
 
 
-db_username = os.environ["DB_USERNAME"]
-db_password = urllib.parse.quote_plus(os.environ["DB_PASSWORD"])
-db_host = os.environ["DB_HOST"]
-db_port = os.getenv("DB_PORT", "5432")
-db_name = os.getenv("DB_NAME", "ocai")
+DB_USERNAME = os.environ["DB_USERNAME"]
+DB_PASSWORD = urllib.parse.quote_plus(os.environ["DB_PASSWORD"])
+DB_HOST = os.environ["DB_HOST"]
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "ocai")
 
-db_url = (
-    f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+db = dataset.connect(
+    f"postgresql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 )
-
-db = dataset.connect(db_url)
 
 messages_table = db["messages"]
 karma_table = db["karma"]
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
+
+
+class VerbosityLevel(IntEnum):
+    KARMA_ONLY = 1
+    MENTIONED = 2
+    UNRESTRICTED = 3
 
 
 class ModelResponse(BaseModel):
