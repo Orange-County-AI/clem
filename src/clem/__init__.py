@@ -178,11 +178,16 @@ async def on_message(message):
             content = content.replace(f"<@{user.id}>", f"@{user.name}")
             content = content.replace(f"<@!{user.id}>", f"@{user.name}")
 
+        # Preserve bot mentions for detection purposes
+        bot_mention = f"<@{bot.user.id}>"
+        content = content.replace(bot_mention, "@Clem")
+
         row = {
             "author": message.author.name,  # Store only the username
             "content": content,
             "timestamp": datetime.now(UTC),
             "channel_id": channel_id,
+            "mentions_bot": bot.user.mentioned_in(message),  # Add this field
         }
         if is_bot_message:
             row["model"] = MODEL
@@ -231,7 +236,7 @@ async def on_message(message):
         should_respond = True
     elif verbosity_level == VerbosityLevel.MENTIONED:
         should_respond = (
-            bot.user.mentioned_in(message) or "clem" in message.content.lower()
+            message.mentions_bot or "clem" in message.content.lower()
         )
     # For KARMA_ONLY, should_respond remains False
 
