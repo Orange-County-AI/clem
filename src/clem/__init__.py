@@ -23,7 +23,7 @@ from enum import IntEnum
 
 class VerbosityLevel(IntEnum):
     KARMA_ONLY = 1
-    MENTIONED_OR_RELEVANT = 2
+    MENTIONED = 2
     UNRESTRICTED = 3
 
 
@@ -68,7 +68,7 @@ def karma_only(channel_id: str) -> bool:
     channel = channels_table.find_one(channel_id=channel_id)
     return (
         channel
-        and channel.get("verbosity_level", VerbosityLevel.MENTIONED_OR_RELEVANT)
+        and channel.get("verbosity_level", VerbosityLevel.MENTIONED)
         == VerbosityLevel.KARMA_ONLY
     )
 
@@ -78,10 +78,10 @@ def get_verbosity_level(channel_id: str) -> VerbosityLevel:
     channel = channels_table.find_one(channel_id=channel_id)
     return (
         VerbosityLevel(
-            channel.get("verbosity_level", VerbosityLevel.MENTIONED_OR_RELEVANT)
+            channel.get("verbosity_level", VerbosityLevel.MENTIONED)
         )
         if channel
-        else VerbosityLevel.MENTIONED_OR_RELEVANT
+        else VerbosityLevel.MENTIONED
     )
 
 
@@ -104,8 +104,8 @@ def respond_to_chat(
     verbosity_level = {verbosity_level}
 
     Your response should adhere to the following verbosity levels:
-    - KARMA_ONLY (1): Do not respond at all. Return will_respond = False.
-    - MENTIONED_OR_RELEVANT (2): Only respond if you were mentioned (response_required is True) or if you have something highly relevant to add to the conversation.
+    - KARMA_ONLY (1): Do not respond at all.
+    - MENTIONED (2): Only respond if you were mentioned
     - UNRESTRICTED (3): You can respond freely, as you normally would.
 
     You are currently in the "{guild_name}" server, in the "#{channel_name}" channel.
@@ -202,7 +202,7 @@ async def on_message(message):
         if bot_response.will_respond and (
             get_verbosity_level(channel_id) == VerbosityLevel.UNRESTRICTED
             or (
-                get_verbosity_level(channel_id) == VerbosityLevel.MENTIONED_OR_RELEVANT
+                get_verbosity_level(channel_id) == VerbosityLevel.MENTIONED
                 and (bot.user.mentioned_in(message) or bot_response.response.strip())
             )
         ):
@@ -290,7 +290,7 @@ async def set_verbosity(ctx, level: int):
 
     verbosity_descriptions = {
         1: "Karma changes only",
-        2: "Mentions and relevant responses",
+        2: "Mentions only",
         3: "Unrestricted",
     }
 
