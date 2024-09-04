@@ -42,7 +42,9 @@ db_host = os.environ["DB_HOST"]
 db_port = os.getenv("DB_PORT", "5432")
 db_name = os.getenv("DB_NAME", "ocai")
 
-db_url = f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+db_url = (
+    f"postgresql://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+)
 
 db = dataset.connect(db_url)
 
@@ -85,7 +87,9 @@ def get_verbosity_level(channel_id: str) -> VerbosityLevel:
     )
 
 
-async def check_is_command_message(bot: commands.Bot, message: discord.Message) -> bool:
+async def check_is_command_message(
+    bot: commands.Bot, message: discord.Message
+) -> bool:
     ctx: Context = await bot.get_context(message)
     return ctx.valid
 
@@ -129,7 +133,9 @@ def respond_to_karma(username: str, change: int, total: int):
 
 @bot.event
 async def on_message(message):
-    logger.info(f"{message.author} (ID: {message.author.id}): {message.content}")
+    logger.info(
+        f"{message.author} (ID: {message.author.id}): {message.content}"
+    )
 
     is_bot_message = message.author == bot.user
 
@@ -171,7 +177,12 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-    if is_bot_message or clem_is_disabled or is_karma_only or is_command_message:
+    if (
+        is_bot_message
+        or clem_is_disabled
+        or is_karma_only
+        or is_command_message
+    ):
         return
 
     chat_history = list(
@@ -201,21 +212,46 @@ async def on_message(message):
         )
 
         logger.info(f"{bot_response.will_respond = }")
-        logger.info(f"Verbosity level: {get_verbosity_level(channel_id)} for guild '{message.guild.name}', channel '#{message.channel.name}'")
+        logger.info(
+            f"Verbosity level: {get_verbosity_level(channel_id)} for guild '{message.guild.name}', channel '#{message.channel.name}'"
+        )
 
         if bot_response.will_respond and (
             get_verbosity_level(channel_id) == VerbosityLevel.UNRESTRICTED
             or (
                 get_verbosity_level(channel_id) == VerbosityLevel.MENTIONED
-                and (bot.user.mentioned_in(message) or bot_response.response.strip())
+                and (
+                    bot.user.mentioned_in(message)
+                    or bot_response.response.strip()
+                )
             )
         ):
             # Check if the response is different from the last user message and the last bot message
-            last_user_message = next((msg for msg in reversed(chat_history) if msg['author_id'] != str(bot.user.id)), None)
-            last_bot_message = next((msg for msg in reversed(chat_history) if msg['author_id'] == str(bot.user.id)), None)
-            
-            if (not last_user_message or last_user_message['content'].lower() != bot_response.response.lower()) and \
-               (not last_bot_message or last_bot_message['content'] != bot_response.response):
+            last_user_message = next(
+                (
+                    msg
+                    for msg in reversed(chat_history)
+                    if msg["author_id"] != str(bot.user.id)
+                ),
+                None,
+            )
+            last_bot_message = next(
+                (
+                    msg
+                    for msg in reversed(chat_history)
+                    if msg["author_id"] == str(bot.user.id)
+                ),
+                None,
+            )
+
+            if (
+                not last_user_message
+                or last_user_message["content"].lower()
+                != bot_response.response.lower()
+            ) and (
+                not last_bot_message
+                or last_bot_message["content"] != bot_response.response
+            ):
                 await message.channel.send(bot_response.response)
             else:
                 logger.info("Duplicate or repetitive message prevented")
@@ -240,7 +276,9 @@ def update_karma(user_id: int, change: int) -> int:
     user_karma = karma_table.find_one(user_id=str(user_id))
     if user_karma:
         new_karma = user_karma["karma"] + change
-        karma_table.update(dict(user_id=str(user_id), karma=new_karma), ["user_id"])
+        karma_table.update(
+            dict(user_id=str(user_id), karma=new_karma), ["user_id"]
+        )
     else:
         new_karma = change
         karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
@@ -281,7 +319,9 @@ def main():
     bot.run(os.environ["BOT_TOKEN"])
 
 
-@bot.hybrid_command(description="Set Clem's verbosity level in the current channel.")
+@bot.hybrid_command(
+    description="Set Clem's verbosity level in the current channel."
+)
 async def set_verbosity(ctx, level: int):
     if level not in [1, 2, 3]:
         await ctx.send("Invalid verbosity level. Please choose 1, 2, or 3.")
