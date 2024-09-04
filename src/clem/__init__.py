@@ -135,6 +135,28 @@ def respond_to_karma(username: str, change: int, total: int):
     """
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@llm(system=SYSTEM, model=MODEL)
+def generate_welcome_message(username: str):
+    """
+    Generate a warm and friendly welcome message for a new user joining the Orange County AI Discord server.
+    Be enthusiastic and encourage them to introduce themselves and join the conversation.
+
+    username: {username}
+    """
+
+
+@bot.event
+async def on_member_join(member):
+    if member.guild.name == "Orange County AI":
+        general_channel = discord.utils.get(
+            member.guild.channels, name="general"
+        )
+        if general_channel:
+            welcome_message = generate_welcome_message(member.name)
+            await general_channel.send(f"{member.mention} {welcome_message}")
+
+
 @bot.event
 async def on_message(message):
     logger.info(
@@ -188,6 +210,14 @@ async def on_message(message):
         or is_command_message
     ):
         return
+
+    if (
+        isinstance(message.channel, discord.TextChannel)
+        and message.channel.name == "general"
+        and message.guild.name == "Orange County AI"
+        and message.type == discord.MessageType.new_member
+    ):
+        return  # Skip processing for the automatic join message
 
     chat_history = list(
         messages_table.find(
