@@ -97,7 +97,7 @@ async def check_is_command_message(
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
-@llm(system=SYSTEM, model=MODEL)
+@llm(system=SYSTEM, model=MODEL, max_tokens=2000)
 def respond_to_chat(
     chat_history: str,
     guild_name: str,
