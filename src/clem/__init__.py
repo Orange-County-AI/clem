@@ -196,21 +196,10 @@ async def on_message(message):
     is_bot_message = message.author == bot.user
     is_command_message = await check_is_command_message(bot, message)
 
-    # Add this check
-    if is_bot_message or is_command_message:
-        return
-
     channel_id = str(message.channel.id)
 
     clem_is_disabled = clem_disabled(channel_id)
     is_karma_only = karma_only(channel_id)
-
-    if not is_bot_message and not clem_is_disabled:
-        video_id = extract_video_id(message.content)
-        if video_id:
-            summary = await get_video_summary(video_id)
-            await message.channel.send(summary)
-            return
 
     karma_changes = process_karma(message.content, message.mentions)
 
@@ -219,7 +208,6 @@ async def on_message(message):
             new_karma = update_karma(user.id, change)
             karma_response = respond_to_karma(user.name, change, new_karma)
             await message.channel.send(karma_response)
-        return
 
     try:
         # Replace user mentions with their names and remove ID information
@@ -243,21 +231,29 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-    if (
+    early_return_conditions = (
         is_bot_message
         or clem_is_disabled
         or is_karma_only
         or is_command_message
-    ):
-        return
+    )
 
-    if (
+    new_member_in_general = (
         isinstance(message.channel, discord.TextChannel)
         and message.channel.name == "general"
         and message.guild.name == "Orange County AI"
         and message.type == discord.MessageType.new_member
-    ):
-        return  # Skip processing for the automatic join message
+    )
+
+    if early_return_conditions or new_member_in_general:
+        return
+
+    video_id = extract_video_id(message.content)
+
+    if video_id:
+        summary = await get_video_summary(video_id)
+        await message.channel.send(summary)
+        return
 
     chat_history = list(
         messages_table.find(
