@@ -130,7 +130,7 @@ def respond_to_karma(username: str, change: int, total: int):
 @llm(system=SYSTEM, model=MODEL)
 def generate_welcome_message(username: str):
     """
-    Generate a warm, friendly, but brief welcome message for a new user joining the Orange County AI Discord server.
+    Generate a warm and friendly but brief welcome message for a new user joining the Orange County AI Discord server.
     Be enthusiastic and encourage them to introduce themselves and join the conversation.
 
     username: {username}
