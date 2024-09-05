@@ -19,6 +19,11 @@ from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
 from enum import IntEnum
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import (
+    TranscriptsDisabled,
+    NoTranscriptFound,
+)
 
 
 SYSTEM = """
@@ -102,7 +107,7 @@ def respond_to_chat(
     chat_history: str,
     guild_name: str,
     channel_name: str,
-):
+) -> str:
     """
     guild_name = {guild_name}
     channel_name = {channel_name}
@@ -116,7 +121,7 @@ def respond_to_chat(
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(system=SYSTEM, model=MODEL)
-def respond_to_karma(username: str, change: int, total: int):
+def respond_to_karma(username: str, change: int, total: int) -> str:
     """
     Announce the change in karma to the chat in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.
 
@@ -128,7 +133,7 @@ def respond_to_karma(username: str, change: int, total: int):
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(system=SYSTEM, model=MODEL)
-def generate_welcome_message(username: str):
+def generate_welcome_message(username: str) -> str:
     """
     Generate a warm and friendly but brief welcome message for a new user joining the Orange County AI Discord server.
     Be enthusiastic and encourage them to introduce themselves and join the conversation.
@@ -148,6 +153,40 @@ async def on_member_join(member):
             await general_channel.send(f"{member.mention} {welcome_message}")
 
 
+def extract_video_id(url):
+    pattern = r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\/(?:watch\?v=)?(.+)"
+    match = re.search(pattern, url)
+    return match.group(1) if match else None
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@llm(system=SYSTEM, model=MODEL, max_tokens=300)
+def summarize_youtube_video(transcript: str, video_title: str) -> str:
+    """
+    Summarize the following YouTube video transcript in a concise manner. Focus on the main points and key takeaways.
+
+    Transcript:
+
+    {transcript}
+    """
+
+
+async def get_video_summary(video_id: str) -> str:
+    try:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        full_transcript = " ".join([entry["text"] for entry in transcript])
+
+        # Fetch video title (you may need to implement this using YouTube API)
+        video_title = "YouTube Video"  # Placeholder
+
+        return summarize_youtube_video(full_transcript, video_title)
+    except (TranscriptsDisabled, NoTranscriptFound):
+        return "Sorry, I couldn't access the transcript for this video."
+    except Exception as e:
+        logger.error(f"Error summarizing YouTube video: {e}")
+        return "An error occurred while trying to summarize the video."
+
+
 @bot.event
 async def on_message(message):
     logger.info(
@@ -155,12 +194,23 @@ async def on_message(message):
     )
 
     is_bot_message = message.author == bot.user
+    is_command_message = await check_is_command_message(bot, message)
+
+    # Add this check
+    if is_bot_message or is_command_message:
+        return
 
     channel_id = str(message.channel.id)
 
     clem_is_disabled = clem_disabled(channel_id)
     is_karma_only = karma_only(channel_id)
-    is_command_message = await check_is_command_message(bot, message)
+
+    if not is_bot_message and not clem_is_disabled:
+        video_id = extract_video_id(message.content)
+        if video_id:
+            summary = await get_video_summary(video_id)
+            await message.channel.send(summary)
+            return
 
     karma_changes = process_karma(message.content, message.mentions)
 
