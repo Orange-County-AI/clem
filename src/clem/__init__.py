@@ -8,7 +8,7 @@ import os
 import re
 import urllib.parse
 from datetime import UTC, datetime
-from discord.ext.commands import Context
+from discord.ext.commands import Context, CheckFailure
 
 import dataset
 import discord
@@ -312,9 +312,20 @@ async def on_ready():
         logger.error(f"Failed to sync commands: {e}")
 
 
+def is_clementine_council():
+    async def predicate(ctx):
+        return (
+            discord.utils.get(ctx.author.roles, name="Clementine Council")
+            is not None
+        )
+
+    return commands.check(predicate)
+
+
 @bot.hybrid_command(
     description="Toggle Clem's automatic responses in the current channel."
 )
+@is_clementine_council()
 async def toggle_clem(ctx):
     channel_id = str(ctx.channel.id)
     channels_table = db["channels"]
@@ -331,13 +342,10 @@ async def toggle_clem(ctx):
     await ctx.send(f"Clem has been {status} in this channel.")
 
 
-def main():
-    bot.run(os.environ["BOT_TOKEN"])
-
-
 @bot.hybrid_command(
     description="Set Clem's verbosity level in the current channel."
 )
+@is_clementine_council()
 async def set_verbosity(ctx, level: int):
     if level not in [1, 2, 3]:
         await ctx.send("Invalid verbosity level. Please choose 1, 2, or 3.")
@@ -364,6 +372,7 @@ async def set_verbosity(ctx, level: int):
 @bot.hybrid_command(
     description="Reset the chat history for the current channel."
 )
+@is_clementine_council()
 async def reset_chat(ctx):
     channel_id = str(ctx.channel.id)
 
@@ -376,3 +385,18 @@ async def reset_chat(ctx):
         logger.error(
             f"Error resetting chat history for channel {channel_id}: {e}"
         )
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, CheckFailure):
+        await ctx.send(
+            "You don't have permission to use this command. Only members of the Clementine Council can use it."
+        )
+    else:
+        # Handle other types of errors
+        logger.error(f"An error occurred: {error}")
+
+
+def main():
+    bot.run(os.environ["BOT_TOKEN"])
