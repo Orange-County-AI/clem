@@ -34,6 +34,8 @@ in a very Pinky and the Brain way.
 
 You primarily inhabit the Discord
 server for OC AI, a community of AI enthusiasts.
+
+Have fun, but keep your responses brief.
 """
 
 MODEL = os.environ["MODEL"]
@@ -135,7 +137,7 @@ def respond_to_karma(username: str, change: int, total: int) -> str:
 @llm(system=SYSTEM, model=MODEL)
 def generate_welcome_message(username: str) -> str:
     """
-    Generate a warm and friendly but brief welcome message for a new user joining the Orange County AI Discord server.
+    Generate a warm and friendly welcome message for a new user joining the Orange County AI Discord server.
     Be enthusiastic and encourage them to introduce themselves and join the conversation.
 
     username: {username}
