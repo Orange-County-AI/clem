@@ -285,11 +285,17 @@ async def on_message(message):
 
     try:
         if should_respond:
-            bot_response = respond_to_chat(
-                context,
-                guild_name=message.guild.name,
-                channel_name=message.channel.name,
-            )
+            try:
+                bot_response = respond_to_chat(
+                    context,
+                    guild_name=message.guild.name,
+                    channel_name=message.channel.name,
+                )
+            except Exception as chat_error:
+                logger.error(
+                    f"Error in respond_to_chat function: {chat_error}"
+                )
+                return
 
             # Check if the response is different from the last user message and the last bot message
             last_user_message = next(
@@ -316,11 +322,14 @@ async def on_message(message):
                 not last_bot_message
                 or last_bot_message["content"] != bot_response
             ):
-                await message.channel.send(bot_response)
+                try:
+                    await message.channel.send(bot_response)
+                except Exception as send_error:
+                    logger.error(f"Error sending message: {send_error}")
             else:
                 logger.info("Duplicate or repetitive message prevented")
     except Exception as e:
-        logger.error(f"Error in respond function after 3 attempts: {e}")
+        logger.error(f"Unexpected error in on_message event handler: {e}")
 
 
 def process_karma(content: str, mentions: list[Member]) -> dict[Member, int]:
