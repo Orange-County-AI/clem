@@ -43,14 +43,6 @@ MODEL = os.environ["MODEL"]
 
 DB_URL = os.getenv("DB_URL")
 
-if not DB_URL:
-    DB_USERNAME = os.environ["DB_USERNAME"]
-    DB_PASSWORD = urllib.parse.quote_plus(os.environ["DB_PASSWORD"])
-    DB_HOST = os.environ["DB_HOST"]
-    DB_PORT = os.getenv("DB_PORT", "5432")
-    DB_NAME = os.getenv("DB_NAME", "ocai")
-    DB_URL = f"postgresql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
 db = dataset.connect(DB_URL)
 
 messages_table = db["messages"]
