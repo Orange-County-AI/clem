@@ -32,11 +32,7 @@ Example: `@user ++` or `@user --`
 
    - `BOT_TOKEN`: Discord bot token
    - `MODEL`: AI model to use
-   - `DB_USERNAME`: Database username
-   - `DB_PASSWORD`: Database password
-   - `DB_HOST`: Database host
-   - `DB_PORT`: Database port (default: 5432)
-   - `DB_NAME`: Database name (default: ocai)
+   - `DB_URL`: Database URL
 
 2. Install dependencies:
 
