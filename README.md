@@ -32,7 +32,7 @@ Example: `@user ++` or `@user --`
 
    - `BOT_TOKEN`: Discord bot token
    - `MODEL`: AI model to use
-   - `DB_URL`: Database URL
+   - `DATABASE_URL`: Database URL
 
 2. Install dependencies:
 

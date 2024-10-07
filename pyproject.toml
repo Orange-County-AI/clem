@@ -13,10 +13,11 @@ dependencies = [
     "google-generativeai>=0.7.2",
     "tenacity>=9.0.0",
     "youtube-transcript-api>=0.6.2",
+    "flask>=3.0.3",
 ]
 
 [project.scripts]
-clem = "clem:main"
+clem = "clem.discord:main"
 
 [build-system]
 requires = ["hatchling"]
