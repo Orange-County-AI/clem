@@ -14,6 +14,7 @@ Clem is a friendly AI assistant for the Orange County AI Discord server, with a 
 - Manages karma points for users
 - Toggleable automatic responses per channel
 - Karma-only mode option
+- Automatically summarizes shared YouTube videos
 
 ## Commands
 
