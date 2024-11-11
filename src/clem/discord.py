@@ -195,7 +195,7 @@ async def get_video_summary(video_id: str) -> str:
 @bot.event
 async def on_message(message):
     logger.info(
-        f"{message.author} (ID: {message.author.id}): {message.content}"
+        f"{message.author} (ID: {message.author.id}): {message.content[:40]}..."
     )
 
     is_bot_message = message.author == bot.user
@@ -309,14 +309,13 @@ async def on_message(message):
 
     video_id = extract_video_id(message.content)
 
-    logger.info(f"Video ID: {video_id}")
-
     if video_id:
         summary = await get_video_summary(video_id)
-        logger.info(f"Summary: {summary}")
         await message.channel.send(summary)
-        logger.info("Sent summary")
+        logger.info("Sent video summary")
         return
+
+    logger.info("Getting chat history")
 
     chat_history = (
         pb.collection("messages")
@@ -331,8 +330,6 @@ async def on_message(message):
         )
         .items
     )
-
-    logger.info(f"Chat history: {chat_history}")
 
     chat_history.reverse()
 
@@ -358,13 +355,13 @@ async def on_message(message):
     try:
         if should_respond:
             try:
-                logger.info(f"Responding to chat with context: {context}")
+                logger.info("Generating bot response")
                 bot_response = respond_to_chat(
                     context,
                     guild_name=message.guild.name,
                     channel_name=message.channel.name,
                 )
-                logger.info(f"Bot response: {bot_response}")
+                logger.info("Bot response generated")
             except Exception as chat_error:
                 logger.error(
                     f"Error in respond_to_chat function: {chat_error}"
