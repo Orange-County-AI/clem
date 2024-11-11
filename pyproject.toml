@@ -3,17 +3,17 @@ name = "clem"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "discord-py>=2.4.0",
     "promptic>=0.7.7",
     "loguru>=0.7.2",
-    "dataset>=1.6.2",
-    "psycopg2-binary>=2.9.9",
     "google-generativeai>=0.7.2",
     "tenacity>=9.0.0",
     "youtube-transcript-api>=0.6.2",
     "flask>=3.0.3",
+    "pocketbase>=0.12.3",
+    "audioop-lts>=0.2.1",
 ]
 
 [project.scripts]
