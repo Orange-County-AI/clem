@@ -224,9 +224,6 @@ async def on_message(message):
         or is_karmic_message
     )
 
-    if early_return_conditions:
-        return
-
     try:
         # First, ensure we have a channel record
         try:
@@ -234,14 +231,16 @@ async def on_message(message):
                 f'channel_id = "{channel_id}"'
             )
         except:
-            # Create channel if it doesn't exist
             channel = pb.collection("channels").create(
                 {
                     "channel_id": channel_id,
                     "disabled": False,
                     "verbosity_level": VerbosityLevel.MENTIONED,
+                    "messages": [],  # Initialize empty messages array
                 }
             )
+
+        logger.info(f"Channel record created: {channel}")
 
         # Ensure we have a discord_user record
         try:
@@ -253,10 +252,13 @@ async def on_message(message):
                 {
                     "user_id": str(message.author.id),
                     "karma": 0,
+                    "messages": [],  # Initialize empty messages array
                 }
             )
 
-        # Create message with relations
+        logger.info(f"User record created: {user}")
+
+        # Create message and update relations
         content = message.content
         for mention in message.mentions:
             content = content.replace(f"<@{mention.id}>", f"@{mention.name}")
@@ -264,18 +266,36 @@ async def on_message(message):
 
         message_record = pb.collection("messages").create(
             {
-                "author": user.id,  # Relation to discord_user
+                "author": user.id,
                 "content": content,
-                "channel": channel.id,  # Relation to channel
+                "channel": channel.id,
                 "model": MODEL if is_bot_message else None,
             }
         )
 
-        print("Message stored successfully")
+        logger.info(f"Message record created: {message_record}")
+
+        # Update relations for both user and channel
+        pb.collection("discord_users").update(
+            user.id, {"messages+": message_record.id}
+        )
+
+        logger.info(f"User record updated: {user}")
+
+        pb.collection("channels").update(
+            channel.id, {"messages+": message_record.id}
+        )
+
+        logger.info(f"Channel record updated: {channel}")
+
+        print("Message stored successfully with updated relations")
     except Exception as e:
         print(f"Error storing message: {e}")
 
     await bot.process_commands(message)
+
+    if early_return_conditions:
+        return
 
     new_member_in_general = (
         isinstance(message.channel, discord.TextChannel)
@@ -289,9 +309,13 @@ async def on_message(message):
 
     video_id = extract_video_id(message.content)
 
+    logger.info(f"Video ID: {video_id}")
+
     if video_id:
         summary = await get_video_summary(video_id)
+        logger.info(f"Summary: {summary}")
         await message.channel.send(summary)
+        logger.info("Sent summary")
         return
 
     chat_history = (
@@ -307,6 +331,8 @@ async def on_message(message):
         )
         .items
     )
+
+    logger.info(f"Chat history: {chat_history}")
 
     chat_history.reverse()
 
@@ -332,11 +358,13 @@ async def on_message(message):
     try:
         if should_respond:
             try:
+                logger.info(f"Responding to chat with context: {context}")
                 bot_response = respond_to_chat(
                     context,
                     guild_name=message.guild.name,
                     channel_name=message.channel.name,
                 )
+                logger.info(f"Bot response: {bot_response}")
             except Exception as chat_error:
                 logger.error(
                     f"Error in respond_to_chat function: {chat_error}"
@@ -370,6 +398,7 @@ async def on_message(message):
             ):
                 try:
                     await message.channel.send(bot_response)
+                    logger.info("Sent bot response")
                 except Exception as send_error:
                     logger.error(f"Error sending message: {send_error}")
             else:
