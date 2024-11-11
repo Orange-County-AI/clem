@@ -179,7 +179,7 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
 
 
-async def get_video_summary(video_id: str) -> str:
+async def get_video_summary(video_id: str) -> str | None:
     try:
         transcript = YouTubeTranscriptApi.get_transcript(
             video_id, proxies=FreeProxy().get()
@@ -190,13 +190,10 @@ async def get_video_summary(video_id: str) -> str:
         video_title = "YouTube Video"  # Placeholder
 
         return summarize_youtube_video(full_transcript, video_title)
-    except (TranscriptsDisabled, NoTranscriptFound) as e:
-        logger.error(f"Error summarizing YouTube video: {e}")
-        logger.exception(e)
-        return "Sorry, I couldn't access the transcript for this video."
     except Exception as e:
         logger.error(f"Error summarizing YouTube video: {e}")
-        return "An error occurred while trying to summarize the video."
+        logger.exception(e)
+        return None
 
 
 @bot.event
@@ -318,9 +315,12 @@ async def on_message(message):
 
     if video_id:
         summary = await get_video_summary(video_id)
-        await message.channel.send(summary)
-        logger.info("Sent video summary")
-        return
+        if summary:
+            await message.channel.send(summary)
+            logger.info("Sent video summary")
+            return
+        else:
+            logger.error("Failed to get video summary")
 
     logger.info("Getting chat history")
 
