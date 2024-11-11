@@ -7,25 +7,26 @@ https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissio
 import os
 import re
 import asyncio
-
-from discord.ext.commands import Context, CheckFailure
+import httpx
+from enum import IntEnum
 
 import discord
 from discord import Member
-from discord.ext import commands
+from discord.ext.commands import (
+    Context,
+    CheckFailure,
+    Bot,
+    check as check_command,
+)
+
 from loguru import logger
+from pocketbase import PocketBase
+from pocketbase.client import Client
 from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
-from enum import IntEnum
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import (
-    TranscriptsDisabled,
-    NoTranscriptFound,
-)
-from pocketbase import PocketBase
-from pocketbase.client import Client
-from fp.fp import FreeProxy
+
+APIFY_TOKEN = os.environ["APIFY_TOKEN"]
 
 
 SYSTEM = """
@@ -51,7 +52,7 @@ POCKETBASE_PASSWORD = os.environ["POCKETBASE_PASSWORD"]
 pb: Client = PocketBase(POCKETBASE_URL)
 pb.admins.auth_with_password(POCKETBASE_EMAIL, POCKETBASE_PASSWORD)
 
-bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
+bot = Bot(command_prefix="!", intents=discord.Intents.all())
 
 
 class VerbosityLevel(IntEnum):
@@ -102,9 +103,7 @@ def get_verbosity_level(channel_id: str) -> VerbosityLevel:
         return VerbosityLevel.MENTIONED
 
 
-async def check_is_command_message(
-    bot: commands.Bot, message: discord.Message
-) -> bool:
+async def check_is_command_message(bot: Bot, message: discord.Message) -> bool:
     ctx: Context = await bot.get_context(message)
     return ctx.valid
 
@@ -179,17 +178,45 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
 
 
+@retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
 async def get_video_summary(video_id: str) -> str | None:
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(
-            video_id, proxies=FreeProxy().get()
+        url = "https://api.apify.com/v2/acts/invideoiq~video-transcript-scraper/run-sync"
+        data = {"video_url": f"https://www.youtube.com/watch?v={video_id}"}
+
+        response = httpx.post(
+            url,
+            params={"token": APIFY_TOKEN},
+            json=data,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
         )
-        full_transcript = " ".join([entry["text"] for entry in transcript])
 
-        # Fetch video title (you may need to implement this using YouTube API)
-        video_title = "YouTube Video"  # Placeholder
+        if response.status_code != 201:
+            logger.error(
+                f"API request failed with status {response.status_code}"
+            )
+            return None
 
-        return summarize_youtube_video(full_transcript, video_title)
+        result = response.json()
+
+        # Combine all transcript text
+        transcript_text = " ".join(
+            segment["text"] for segment in result.get("transcript", [])
+        )
+
+        if not transcript_text:
+            # Fallback to the simple text field if transcript array is empty
+            transcript_text = result.get("text", "")
+
+        if not transcript_text:
+            logger.error("No transcript found in response")
+            return None
+
+        return summarize_youtube_video(
+            transcript_text, result.get("title", "YouTube Video")
+        )
+
     except Exception as e:
         logger.error(f"Error summarizing YouTube video: {e}")
         logger.exception(e)
@@ -457,7 +484,7 @@ def is_clementine_council():
             is not None
         )
 
-    return commands.check(predicate)
+    return check_command(predicate)
 
 
 @bot.hybrid_command(
