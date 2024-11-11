@@ -6,6 +6,8 @@ https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissio
 
 import os
 import re
+import asyncio
+
 from discord.ext.commands import Context, CheckFailure
 
 import discord
@@ -23,7 +25,7 @@ from youtube_transcript_api._errors import (
 )
 from pocketbase import PocketBase
 from pocketbase.client import Client
-import asyncio
+from fp.fp import FreeProxy
 
 
 SYSTEM = """
@@ -179,7 +181,9 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
 
 async def get_video_summary(video_id: str) -> str:
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        transcript = YouTubeTranscriptApi.get_transcript(
+            video_id, proxies=FreeProxy().get()
+        )
         full_transcript = " ".join([entry["text"] for entry in transcript])
 
         # Fetch video title (you may need to implement this using YouTube API)
