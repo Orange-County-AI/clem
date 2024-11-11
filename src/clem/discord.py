@@ -190,7 +190,8 @@ async def get_video_summary(video_id: str) -> str:
         video_title = "YouTube Video"  # Placeholder
 
         return summarize_youtube_video(full_transcript, video_title)
-    except (TranscriptsDisabled, NoTranscriptFound):
+    except (TranscriptsDisabled, NoTranscriptFound) as e:
+        logger.exception(e)
         return "Sorry, I couldn't access the transcript for this video."
     except Exception as e:
         logger.error(f"Error summarizing YouTube video: {e}")
