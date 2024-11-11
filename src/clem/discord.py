@@ -178,7 +178,7 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
 
 
-@retry(stop=stop_after_attempt(2), wait=wait_fixed(1))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 async def get_video_summary(video_id: str) -> str | None:
     try:
         url = "https://api.apify.com/v2/acts/invideoiq~video-transcript-scraper/run-sync"
@@ -343,7 +343,7 @@ async def on_message(message):
     if video_id:
         summary = await get_video_summary(video_id)
         if summary:
-            await message.channel.send(summary)
+            await message.reply(summary)
             logger.info("Sent video summary")
             return
         else:
