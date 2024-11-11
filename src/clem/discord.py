@@ -23,6 +23,7 @@ from youtube_transcript_api._errors import (
 )
 from pocketbase import PocketBase
 from pocketbase.client import Client
+import asyncio
 
 
 SYSTEM = """
@@ -520,14 +521,44 @@ async def reset_chat(ctx):
     channel_id = str(ctx.channel.id)
 
     try:
-        pb.collection("messages").delete(filter=f'channel_id = "{channel_id}"')
-        await ctx.send("Chat history for this channel has been reset.")
+        # First get the channel record
+        channel = pb.collection("channels").get_first_list_item(
+            f'channel_id = "{channel_id}"'
+        )
+
+        # Get all messages for this channel
+        messages = pb.collection("messages").get_list(
+            1,  # page
+            10_000,  # per_page
+            query_params={"filter": f'channel = "{channel.id}"'},
+        )
+
+        # Create deletion tasks for all messages
+        deletion_tasks = [
+            asyncio.create_task(delete_message(msg.id))
+            for msg in messages.items
+        ]
+
+        # Wait for all deletions to complete
+        await asyncio.gather(*deletion_tasks)
+
+        await ctx.send(
+            f"Chat history reset complete! Deleted {len(deletion_tasks)} messages."
+        )
         logger.info(f"Chat history reset for channel {channel_id}")
     except Exception as e:
         await ctx.send("An error occurred while resetting the chat history.")
         logger.error(
             f"Error resetting chat history for channel {channel_id}: {e}"
         )
+
+
+async def delete_message(message_id: str):
+    """Helper function to delete a single message"""
+    try:
+        pb.collection("messages").delete(message_id)
+    except Exception as e:
+        logger.error(f"Error deleting message {message_id}: {e}")
 
 
 @bot.event
