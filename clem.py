@@ -6,9 +6,8 @@ https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissio
 
 import os
 import re
-import asyncio
-import httpx
-from enum import IntEnum
+from datetime import UTC, datetime
+from discord.ext.commands import Context, CheckFailure
 
 import discord
 from discord import Member
@@ -25,9 +24,10 @@ from pocketbase.client import Client
 from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
+from enum import IntEnum
+import httpx
 
-APIFY_TOKEN = os.environ["APIFY_TOKEN"]
-
+TRANSCRIPT_API_TOKEN = os.environ["TRANSCRIPT_API_TOKEN"]
 
 SYSTEM = """
 You are Clem, the Orange County AI Orange! You wear thick nerdy glasses and sport a single green leaf on your stem.
@@ -42,17 +42,17 @@ Have fun, but keep your responses brief.
 """
 
 MODEL = os.environ["MODEL"]
-
-
-POCKETBASE_URL = os.environ["POCKETBASE_URL"]
-POCKETBASE_EMAIL = os.environ["POCKETBASE_EMAIL"]
-POCKETBASE_PASSWORD = os.environ["POCKETBASE_PASSWORD"]
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Initialize PocketBase client
 pb: Client = PocketBase(POCKETBASE_URL)
 pb.admins.auth_with_password(POCKETBASE_EMAIL, POCKETBASE_PASSWORD)
 
-bot = Bot(command_prefix="!", intents=discord.Intents.all())
+messages_table = db["messages"]
+karma_table = db["karma"]
+channels_table = db["channels"]
+
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
 
 class VerbosityLevel(IntEnum):
@@ -66,33 +66,24 @@ class ModelResponse(BaseModel):
 
 
 def clem_disabled(channel_id: str) -> bool:
-    try:
-        channel = pb.collection("channels").get_first_list_item(
-            f'channel_id = "{channel_id}"'
-        )
-        return channel.disabled if channel else False
-    except:
-        return False
+    channel = channels_table.find_one(channel_id=channel_id)
+    return channel and channel.get("disabled", False)
 
 
 def karma_only(channel_id: str) -> bool:
-    try:
-        channel = pb.collection("channels").get_first_list_item(
-            f'channel_id = "{channel_id}"'
-        )
-        return (
-            channel.verbosity_level == VerbosityLevel.KARMA_ONLY
-            if channel
-            else False
-        )
-    except:
-        return False
+    channel = channels_table.find_one(channel_id=channel_id)
+    return (
+        channel
+        and channel.get("verbosity_level", VerbosityLevel.MENTIONED)
+        == VerbosityLevel.KARMA_ONLY
+    )
 
 
 def get_verbosity_level(channel_id: str) -> VerbosityLevel:
-    try:
-        channel = pb.collection("channels").get_first_list_item(
-            f'channel_id = "{channel_id}"'
+    channel = channels_table.find_one(channel_id=channel_id)
+    return (
+        VerbosityLevel(
+            channel.get("verbosity_level", VerbosityLevel.MENTIONED)
         )
         return (
             VerbosityLevel(channel.verbosity_level)
@@ -181,33 +172,27 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 async def get_video_summary(video_id: str) -> str | None:
     try:
-        url = "https://api.apify.com/v2/acts/invideoiq~video-transcript-scraper/run-sync"
-        data = {"video_url": f"https://www.youtube.com/watch?v={video_id}"}
+        url = "https://windmill.knowsuchagency.com/api/w/general/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
+        data = {
+            "video_id_or_url": f"https://www.youtube.com/watch?v={video_id}"
+        }
 
         response = httpx.post(
             url,
-            params={"token": APIFY_TOKEN},
             json=data,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {TRANSCRIPT_API_TOKEN}",
+            },
             timeout=30,
         )
 
-        if response.status_code != 201:
-            logger.error(
-                f"API request failed with status {response.status_code}"
-            )
-            return None
+        response.raise_for_status()
 
         result = response.json()
 
         # Combine all transcript text
-        transcript_text = " ".join(
-            segment["text"] for segment in result.get("transcript", [])
-        )
-
-        if not transcript_text:
-            # Fallback to the simple text field if transcript array is empty
-            transcript_text = result.get("text", "")
+        transcript_text = result.get("transcript", "")
 
         if not transcript_text:
             logger.error("No transcript found in response")
@@ -345,9 +330,9 @@ async def on_message(message):
         if summary:
             await message.reply(summary)
             logger.info("Sent video summary")
-            return
         else:
             logger.error("Failed to get video summary")
+        return
 
     logger.info("Getting chat history")
 
@@ -493,21 +478,14 @@ def is_clementine_council():
 @is_clementine_council()
 async def toggle_clem(ctx):
     channel_id = str(ctx.channel.id)
-    try:
-        channel = pb.collection("channels").get_first_list_item(
-            f'channel_id = "{channel_id}"'
-        )
-        new_state = not channel.disabled
-        pb.collection("channels").update(channel.id, {"disabled": new_state})
-    except:
-        new_state = True
-        pb.collection("channels").create(
-            {
-                "channel_id": channel_id,
-                "disabled": new_state,
-                "verbosity_level": VerbosityLevel.MENTIONED,
-            }
-        )
+
+    channel = channels_table.find_one(channel_id=channel_id)
+    current_state = channel and channel.get("disabled", False)
+    new_state = not current_state
+
+    channels_table.upsert(
+        dict(channel_id=channel_id, disabled=new_state), ["channel_id"]
+    )
 
     status = "disabled" if new_state else "enabled"
     await ctx.send(f"Clem has been {status} in this channel.")
@@ -523,17 +501,10 @@ async def set_verbosity(ctx, level: int):
         return
 
     channel_id = str(ctx.channel.id)
-    try:
-        channel = pb.collection("channels").get_first_list_item(
-            f'channel_id = "{channel_id}"'
-        )
-        pb.collection("channels").update(
-            channel.id, {"verbosity_level": level}
-        )
-    except:
-        pb.collection("channels").create(
-            {"channel_id": channel_id, "verbosity_level": level}
-        )
+
+    channels_table.upsert(
+        dict(channel_id=channel_id, verbosity_level=level), ["channel_id"]
+    )
 
     verbosity_descriptions = {
         1: "Karma changes only",
