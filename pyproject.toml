@@ -10,10 +10,7 @@ dependencies = [
     "loguru>=0.7.2",
     "dataset>=1.6.2",
     "psycopg2-binary>=2.9.9",
-    "google-generativeai>=0.7.2",
     "tenacity>=9.0.0",
-    "youtube-transcript-api>=0.6.2",
-    "flask>=3.0.3",
 ]
 
 [project.scripts]
