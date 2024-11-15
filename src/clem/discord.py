@@ -24,7 +24,9 @@ from youtube_transcript_api._errors import (
     TranscriptsDisabled,
     NoTranscriptFound,
 )
+import httpx
 
+APIFY_TOKEN = os.environ["APIFY_TOKEN"]
 
 SYSTEM = """
 You are Clem, the Orange County AI Orange! You wear thick nerdy glasses and sport a single green leaf on your stem.
@@ -166,20 +168,49 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
 
 
-async def get_video_summary(video_id: str) -> str:
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+async def get_video_summary(video_id: str) -> str | None:
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        full_transcript = " ".join([entry["text"] for entry in transcript])
+        url = "https://api.apify.com/v2/acts/invideoiq~video-transcript-scraper/run-sync"
+        data = {"video_url": f"https://www.youtube.com/watch?v={video_id}"}
 
-        # Fetch video title (you may need to implement this using YouTube API)
-        video_title = "YouTube Video"  # Placeholder
+        response = httpx.post(
+            url,
+            params={"token": APIFY_TOKEN},
+            json=data,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
 
-        return summarize_youtube_video(full_transcript, video_title)
-    except (TranscriptsDisabled, NoTranscriptFound):
-        return "Sorry, I couldn't access the transcript for this video."
+        if response.status_code != 201:
+            logger.error(
+                f"API request failed with status {response.status_code}"
+            )
+            return None
+
+        result = response.json()
+
+        # Combine all transcript text
+        transcript_text = " ".join(
+            segment["text"] for segment in result.get("transcript", [])
+        )
+
+        if not transcript_text:
+            # Fallback to the simple text field if transcript array is empty
+            transcript_text = result.get("text", "")
+
+        if not transcript_text:
+            logger.error("No transcript found in response")
+            return None
+
+        return summarize_youtube_video(
+            transcript_text, result.get("title", "YouTube Video")
+        )
+
     except Exception as e:
         logger.error(f"Error summarizing YouTube video: {e}")
-        return "An error occurred while trying to summarize the video."
+        logger.exception(e)
+        return None
 
 
 @bot.event
@@ -247,7 +278,11 @@ async def on_message(message):
 
     if video_id:
         summary = await get_video_summary(video_id)
-        await message.channel.send(summary)
+        if summary:
+            await message.reply(summary)
+            logger.info("Sent video summary")
+        else:
+            logger.error("Failed to get video summary")
         return
 
     chat_history = list(
