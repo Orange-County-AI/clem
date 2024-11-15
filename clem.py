@@ -9,18 +9,11 @@ import re
 from datetime import UTC, datetime
 from discord.ext.commands import Context, CheckFailure
 
+import dataset
 import discord
 from discord import Member
-from discord.ext.commands import (
-    Context,
-    CheckFailure,
-    Bot,
-    check as check_command,
-)
-
+from discord.ext import commands
 from loguru import logger
-from pocketbase import PocketBase
-from pocketbase.client import Client
 from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
@@ -44,9 +37,7 @@ Have fun, but keep your responses brief.
 MODEL = os.environ["MODEL"]
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Initialize PocketBase client
-pb: Client = PocketBase(POCKETBASE_URL)
-pb.admins.auth_with_password(POCKETBASE_EMAIL, POCKETBASE_PASSWORD)
+db = dataset.connect(DATABASE_URL)
 
 messages_table = db["messages"]
 karma_table = db["karma"]
@@ -85,16 +76,14 @@ def get_verbosity_level(channel_id: str) -> VerbosityLevel:
         VerbosityLevel(
             channel.get("verbosity_level", VerbosityLevel.MENTIONED)
         )
-        return (
-            VerbosityLevel(channel.verbosity_level)
-            if channel
-            else VerbosityLevel.MENTIONED
-        )
-    except:
-        return VerbosityLevel.MENTIONED
+        if channel
+        else VerbosityLevel.MENTIONED
+    )
 
 
-async def check_is_command_message(bot: Bot, message: discord.Message) -> bool:
+async def check_is_command_message(
+    bot: commands.Bot, message: discord.Message
+) -> bool:
     ctx: Context = await bot.get_context(message)
     return ctx.valid
 
@@ -211,7 +200,7 @@ async def get_video_summary(video_id: str) -> str | None:
 @bot.event
 async def on_message(message):
     logger.info(
-        f"{message.author} (ID: {message.author.id}): {message.content[:40]}..."
+        f"{message.author} (ID: {message.author.id}): {message.content}"
     )
 
     is_bot_message = message.author == bot.user
@@ -230,88 +219,34 @@ async def on_message(message):
             karma_response = respond_to_karma(user.name, change, new_karma)
             await message.channel.send(karma_response)
 
-    is_karmic_message = "++" in message.content or "--" in message.content
+    try:
+        # Replace user mentions with their names and remove ID information
+        content = message.content
+        for user in message.mentions:
+            content = content.replace(f"<@{user.id}>", f"@{user.name}")
+            content = content.replace(f"<@!{user.id}>", f"@{user.name}")
+
+        row = {
+            "author": message.author.name,  # Store only the username
+            "content": content,
+            "timestamp": datetime.now(UTC),
+            "channel_id": channel_id,
+        }
+        if is_bot_message:
+            row["model"] = MODEL
+        messages_table.insert(row)
+        print("Message stored successfully")
+    except Exception as e:
+        print(f"Error storing message: {e}")
+
+    await bot.process_commands(message)
 
     early_return_conditions = (
         is_bot_message
         or clem_is_disabled
         or is_karma_only
         or is_command_message
-        or is_karmic_message
     )
-
-    try:
-        # First, ensure we have a channel record
-        try:
-            channel = pb.collection("channels").get_first_list_item(
-                f'channel_id = "{channel_id}"'
-            )
-        except:
-            channel = pb.collection("channels").create(
-                {
-                    "channel_id": channel_id,
-                    "disabled": False,
-                    "verbosity_level": VerbosityLevel.MENTIONED,
-                    "messages": [],  # Initialize empty messages array
-                }
-            )
-
-        logger.info(f"Channel record created: {channel}")
-
-        # Ensure we have a discord_user record
-        try:
-            user = pb.collection("discord_users").get_first_list_item(
-                f'user_id = "{message.author.id}"'
-            )
-        except:
-            user = pb.collection("discord_users").create(
-                {
-                    "user_id": str(message.author.id),
-                    "karma": 0,
-                    "messages": [],  # Initialize empty messages array
-                }
-            )
-
-        logger.info(f"User record created: {user}")
-
-        # Create message and update relations
-        content = message.content
-        for mention in message.mentions:
-            content = content.replace(f"<@{mention.id}>", f"@{mention.name}")
-            content = content.replace(f"<@!{mention.id}>", f"@{mention.name}")
-
-        message_record = pb.collection("messages").create(
-            {
-                "author": user.id,
-                "content": content,
-                "channel": channel.id,
-                "model": MODEL if is_bot_message else None,
-            }
-        )
-
-        logger.info(f"Message record created: {message_record}")
-
-        # Update relations for both user and channel
-        pb.collection("discord_users").update(
-            user.id, {"messages+": message_record.id}
-        )
-
-        logger.info(f"User record updated: {user}")
-
-        pb.collection("channels").update(
-            channel.id, {"messages+": message_record.id}
-        )
-
-        logger.info(f"Channel record updated: {channel}")
-
-        print("Message stored successfully with updated relations")
-    except Exception as e:
-        print(f"Error storing message: {e}")
-
-    await bot.process_commands(message)
-
-    if early_return_conditions:
-        return
 
     new_member_in_general = (
         isinstance(message.channel, discord.TextChannel)
@@ -320,7 +255,7 @@ async def on_message(message):
         and message.type == discord.MessageType.new_member
     )
 
-    if new_member_in_general:
+    if early_return_conditions or new_member_in_general:
         return
 
     video_id = extract_video_id(message.content)
@@ -334,30 +269,19 @@ async def on_message(message):
             logger.error("Failed to get video summary")
         return
 
-    logger.info("Getting chat history")
-
-    chat_history = (
-        pb.collection("messages")
-        .get_list(
-            1,  # page
-            100,  # per_page
-            {
-                "filter": f'channel = "{channel.id}"',
-                "sort": "-created",
-                "expand": "author",
-            },
+    chat_history = list(
+        messages_table.find(
+            channel_id=channel_id,
+            order_by=["-timestamp"],
+            _limit=100,
         )
-        .items
     )
 
     chat_history.reverse()
 
-    # Update the context formatting to correctly access expanded data
+    # Format messages for context, using only usernames
     context = "\n".join(
-        [
-            f"{msg.expand['author'].user_id}: {msg.content}"
-            for msg in chat_history
-        ]
+        [f"{msg['author']}: {msg['content']}" for msg in chat_history]
     )
 
     verbosity_level = get_verbosity_level(channel_id)
@@ -374,13 +298,11 @@ async def on_message(message):
     try:
         if should_respond:
             try:
-                logger.info("Generating bot response")
                 bot_response = respond_to_chat(
                     context,
                     guild_name=message.guild.name,
                     channel_name=message.channel.name,
                 )
-                logger.info("Bot response generated")
             except Exception as chat_error:
                 logger.error(
                     f"Error in respond_to_chat function: {chat_error}"
@@ -392,7 +314,7 @@ async def on_message(message):
                 (
                     msg
                     for msg in reversed(chat_history)
-                    if msg.author != bot.user.name
+                    if msg["author"] != bot.user.name
                 ),
                 None,
             )
@@ -400,21 +322,20 @@ async def on_message(message):
                 (
                     msg
                     for msg in reversed(chat_history)
-                    if msg.author == bot.user.name
+                    if msg["author"] == bot.user.name
                 ),
                 None,
             )
 
             if (
                 not last_user_message
-                or last_user_message.content.lower() != bot_response.lower()
+                or last_user_message["content"].lower() != bot_response.lower()
             ) and (
                 not last_bot_message
-                or last_bot_message.content != bot_response
+                or last_bot_message["content"] != bot_response
             ):
                 try:
                     await message.channel.send(bot_response)
-                    logger.info("Sent bot response")
                 except Exception as send_error:
                     logger.error(f"Error sending message: {send_error}")
             else:
@@ -437,17 +358,15 @@ def process_karma(content: str, mentions: list[Member]) -> dict[Member, int]:
 
 
 def update_karma(user_id: int, change: int) -> int:
-    try:
-        user = pb.collection("discord_users").get_first_list_item(
-            f'user_id = "{user_id}"'
+    user_karma = karma_table.find_one(user_id=str(user_id))
+    if user_karma:
+        new_karma = user_karma["karma"] + change
+        karma_table.update(
+            dict(user_id=str(user_id), karma=new_karma), ["user_id"]
         )
-        new_karma = user.karma + change
-        pb.collection("discord_users").update(user.id, {"karma": new_karma})
-    except:
+    else:
         new_karma = change
-        pb.collection("discord_users").create(
-            {"user_id": str(user_id), "karma": new_karma, "messages": []}
-        )
+        karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
     return new_karma
 
 
@@ -469,7 +388,7 @@ def is_clementine_council():
             is not None
         )
 
-    return check_command(predicate)
+    return commands.check(predicate)
 
 
 @bot.hybrid_command(
@@ -525,44 +444,14 @@ async def reset_chat(ctx):
     channel_id = str(ctx.channel.id)
 
     try:
-        # First get the channel record
-        channel = pb.collection("channels").get_first_list_item(
-            f'channel_id = "{channel_id}"'
-        )
-
-        # Get all messages for this channel
-        messages = pb.collection("messages").get_list(
-            1,  # page
-            10_000,  # per_page
-            query_params={"filter": f'channel = "{channel.id}"'},
-        )
-
-        # Create deletion tasks for all messages
-        deletion_tasks = [
-            asyncio.create_task(delete_message(msg.id))
-            for msg in messages.items
-        ]
-
-        # Wait for all deletions to complete
-        await asyncio.gather(*deletion_tasks)
-
-        await ctx.send(
-            f"Chat history reset complete! Deleted {len(deletion_tasks)} messages."
-        )
+        messages_table.delete(channel_id=channel_id)
+        await ctx.send("Chat history for this channel has been reset.")
         logger.info(f"Chat history reset for channel {channel_id}")
     except Exception as e:
         await ctx.send("An error occurred while resetting the chat history.")
         logger.error(
             f"Error resetting chat history for channel {channel_id}: {e}"
         )
-
-
-async def delete_message(message_id: str):
-    """Helper function to delete a single message"""
-    try:
-        pb.collection("messages").delete(message_id)
-    except Exception as e:
-        logger.error(f"Error deleting message {message_id}: {e}")
 
 
 @bot.event

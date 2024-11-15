@@ -14,7 +14,6 @@ Clem is a friendly AI assistant for the Orange County AI Discord server, with a 
 - Manages karma points for users
 - Toggleable automatic responses per channel
 - Karma-only mode option
-- Automatically summarizes shared YouTube videos
 
 ## Commands
 
@@ -33,11 +32,7 @@ Example: `@user ++` or `@user --`
 
    - `BOT_TOKEN`: Discord bot token
    - `MODEL`: AI model to use
-   - `ANTHROPIC_API_KEY`: Anthropic API key
-   - `POCKETBASE_URL`: PocketBase URL
-   - `POCKETBASE_EMAIL`: PocketBase email
-   - `POCKETBASE_PASSWORD`: PocketBase password
-   - `APIFY_TOKEN`: Apify API token
+   - `DATABASE_URL`: Database URL
 
 2. Install dependencies:
 
