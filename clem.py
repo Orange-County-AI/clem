@@ -6,7 +6,6 @@ https://discord.com/api/oauth2/authorize?client_id=1279233849204805817&permissio
 
 import os
 import re
-import urllib.parse
 from datetime import UTC, datetime
 from discord.ext.commands import Context, CheckFailure
 
@@ -19,14 +18,9 @@ from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed
 from enum import IntEnum
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import (
-    TranscriptsDisabled,
-    NoTranscriptFound,
-)
 import httpx
 
-APIFY_TOKEN = os.environ["APIFY_TOKEN"]
+TRANSCRIPT_API_TOKEN = os.environ["TRANSCRIPT_API_TOKEN"]
 
 SYSTEM = """
 You are Clem, the Orange County AI Orange! You wear thick nerdy glasses and sport a single green leaf on your stem.
@@ -41,14 +35,13 @@ Have fun, but keep your responses brief.
 """
 
 MODEL = os.environ["MODEL"]
-
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 db = dataset.connect(DATABASE_URL)
 
 messages_table = db["messages"]
 karma_table = db["karma"]
+channels_table = db["channels"]
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
@@ -64,13 +57,11 @@ class ModelResponse(BaseModel):
 
 
 def clem_disabled(channel_id: str) -> bool:
-    channels_table = db["channels"]
     channel = channels_table.find_one(channel_id=channel_id)
     return channel and channel.get("disabled", False)
 
 
 def karma_only(channel_id: str) -> bool:
-    channels_table = db["channels"]
     channel = channels_table.find_one(channel_id=channel_id)
     return (
         channel
@@ -80,7 +71,6 @@ def karma_only(channel_id: str) -> bool:
 
 
 def get_verbosity_level(channel_id: str) -> VerbosityLevel:
-    channels_table = db["channels"]
     channel = channels_table.find_one(channel_id=channel_id)
     return (
         VerbosityLevel(
@@ -171,33 +161,27 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 async def get_video_summary(video_id: str) -> str | None:
     try:
-        url = "https://api.apify.com/v2/acts/invideoiq~video-transcript-scraper/run-sync"
-        data = {"video_url": f"https://www.youtube.com/watch?v={video_id}"}
+        url = "https://windmill.knowsuchagency.com/api/w/general/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
+        data = {
+            "video_id_or_url": f"https://www.youtube.com/watch?v={video_id}"
+        }
 
         response = httpx.post(
             url,
-            params={"token": APIFY_TOKEN},
             json=data,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {TRANSCRIPT_API_TOKEN}",
+            },
             timeout=30,
         )
 
-        if response.status_code != 201:
-            logger.error(
-                f"API request failed with status {response.status_code}"
-            )
-            return None
+        response.raise_for_status()
 
         result = response.json()
 
         # Combine all transcript text
-        transcript_text = " ".join(
-            segment["text"] for segment in result.get("transcript", [])
-        )
-
-        if not transcript_text:
-            # Fallback to the simple text field if transcript array is empty
-            transcript_text = result.get("text", "")
+        transcript_text = result.get("transcript", "")
 
         if not transcript_text:
             logger.error("No transcript found in response")
@@ -413,7 +397,6 @@ def is_clementine_council():
 @is_clementine_council()
 async def toggle_clem(ctx):
     channel_id = str(ctx.channel.id)
-    channels_table = db["channels"]
 
     channel = channels_table.find_one(channel_id=channel_id)
     current_state = channel and channel.get("disabled", False)
@@ -437,7 +420,6 @@ async def set_verbosity(ctx, level: int):
         return
 
     channel_id = str(ctx.channel.id)
-    channels_table = db["channels"]
 
     channels_table.upsert(
         dict(channel_id=channel_id, verbosity_level=level), ["channel_id"]

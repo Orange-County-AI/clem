@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-clem = "clem.discord:main"
+clem = "clem:main"
 
 [build-system]
 requires = ["hatchling"]
