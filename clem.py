@@ -21,6 +21,7 @@ from enum import IntEnum
 import httpx
 
 TRANSCRIPT_API_TOKEN = os.environ["TRANSCRIPT_API_TOKEN"]
+WEB_SUMMARY_API_TOKEN = os.environ["WEB_SUMMARY_API_TOKEN"]
 
 SYSTEM = """
 You are Clem, the Orange County AI Orange! You wear thick nerdy glasses and sport a single green leaf on your stem.
@@ -146,6 +147,12 @@ def extract_video_id(url):
     return match.group(1) if match else None
 
 
+def extract_url(content: str) -> str | None:
+    pattern = r"https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+"
+    match = re.search(pattern, content)
+    return match.group(0) if match else None
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 @llm(system=SYSTEM, model=MODEL, max_tokens=300)
 def summarize_youtube_video(transcript: str, video_title: str) -> str:
@@ -193,6 +200,29 @@ async def get_video_summary(video_id: str) -> str | None:
 
     except Exception as e:
         logger.error(f"Error summarizing YouTube video: {e}")
+        logger.exception(e)
+        return None
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+def get_web_summary(url: str) -> str | None:
+    try:
+        response = httpx.post(
+            "https://windmill.knowsuchagency.com/api/w/general/jobs/run_wait_result/p/u/stephan/web_summarizer",
+            json={"url": url},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {WEB_SUMMARY_API_TOKEN}",
+            },
+            timeout=30,
+        )
+
+        response.raise_for_status()
+        result = response.json()
+        return result
+
+    except Exception as e:
+        logger.error(f"Error summarizing webpage: {e}")
         logger.exception(e)
         return None
 
@@ -259,6 +289,7 @@ async def on_message(message):
         return
 
     video_id = extract_video_id(message.content)
+    url = extract_url(message.content)
 
     if video_id:
         summary = await get_video_summary(video_id)
@@ -267,6 +298,14 @@ async def on_message(message):
             logger.info("Sent video summary")
         else:
             logger.error("Failed to get video summary")
+        return
+    elif url and not video_id:  # Only summarize non-YouTube URLs
+        summary = get_web_summary(url)
+        if summary:
+            await message.reply(summary)
+            logger.info("Sent web page summary")
+        else:
+            logger.error("Failed to get web page summary")
         return
 
     chat_history = list(
