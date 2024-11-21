@@ -168,7 +168,7 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
 async def get_video_summary(video_id: str) -> str | None:
     try:
-        url = "https://windmill.knowsuchagency.com/api/w/general/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
+        url = "https://homebase.knowsuchagency.com/api/w/general/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
         data = {
             "video_id_or_url": f"https://www.youtube.com/watch?v={video_id}"
         }
