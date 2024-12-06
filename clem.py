@@ -16,7 +16,7 @@ from discord.ext import commands
 from loguru import logger
 from promptic import llm
 from pydantic import BaseModel
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
 from enum import IntEnum
 import httpx
 
@@ -89,7 +89,11 @@ async def check_is_command_message(
     return ctx.valid
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1),
+    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+)
 @llm(system=SYSTEM, model=MODEL, max_tokens=500)
 def respond_to_chat(
     chat_history: str,
@@ -107,7 +111,11 @@ def respond_to_chat(
     """
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1),
+    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+)
 @llm(system=SYSTEM, model=MODEL)
 def respond_to_karma(username: str, change: int, total: int) -> str:
     """
@@ -119,7 +127,11 @@ def respond_to_karma(username: str, change: int, total: int) -> str:
     """
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1),
+    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+)
 @llm(system=SYSTEM, model=MODEL)
 def generate_welcome_message(username: str) -> str:
     """
@@ -148,12 +160,16 @@ def extract_video_id(url):
 
 
 def extract_url(content: str) -> str | None:
-    pattern = r"https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+"
+    pattern = r"https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?:[^\s()<>]+|\(([^\s()<>]+\))*\))+"
     match = re.search(pattern, content)
     return match.group(0) if match else None
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1),
+    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+)
 @llm(system=SYSTEM, model=MODEL, max_tokens=300)
 def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
@@ -165,10 +181,14 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1),
+    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+)
 async def get_video_summary(video_id: str) -> str | None:
     try:
-        url = "https://homebase.knowsuchagency.com/api/w/general/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
+        url = "http://mini.tail9dd8e.ts.net/api/w/default/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
         data = {
             "video_id_or_url": f"https://www.youtube.com/watch?v={video_id}"
         }
@@ -204,11 +224,15 @@ async def get_video_summary(video_id: str) -> str | None:
         return None
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1),
+    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+)
 def get_web_summary(url: str) -> str | None:
     try:
         response = httpx.post(
-            "https://windmill.knowsuchagency.com/api/w/general/jobs/run_wait_result/p/u/stephan/web_summarizer",
+            "http://mini.tail9dd8e.ts.net/api/w/default/jobs/run_wait_result/p/u/stephan/web_summarizer",
             json={"url": url},
             headers={
                 "Content-Type": "application/json",
