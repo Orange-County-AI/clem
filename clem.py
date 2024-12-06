@@ -188,7 +188,7 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
 )
 async def get_video_summary(video_id: str) -> str | None:
     try:
-        url = "http://mini.tail9dd8e.ts.net/api/w/default/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
+        url = "https://windmill.knowsuchagency.com/api/w/default/jobs/run_wait_result/p/u/stephan/get_youtube_transcript"
         data = {
             "video_id_or_url": f"https://www.youtube.com/watch?v={video_id}"
         }
@@ -232,7 +232,7 @@ async def get_video_summary(video_id: str) -> str | None:
 def get_web_summary(url: str) -> str | None:
     try:
         response = httpx.post(
-            "http://mini.tail9dd8e.ts.net/api/w/default/jobs/run_wait_result/p/u/stephan/web_summarizer",
+            "https://windmill.knowsuchagency.com/api/w/default/jobs/run_wait_result/p/u/stephan/web_summarizer",
             json={"url": url},
             headers={
                 "Content-Type": "application/json",
