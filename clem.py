@@ -330,7 +330,6 @@ async def on_message(message):
             logger.info("Sent web page summary")
         else:
             logger.error("Failed to get web page summary")
-            await message.reply(f"Failed to get web page summary for {url}")
         return
 
     chat_history = list(
