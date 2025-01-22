@@ -238,7 +238,7 @@ def get_web_summary(url: str) -> str | None:
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {WEB_SUMMARY_API_TOKEN}",
             },
-            timeout=60,
+            timeout=90,
         )
 
         response.raise_for_status()
