@@ -35,7 +35,7 @@ server for OC AI, a community of AI enthusiasts.
 Have fun, but keep your responses brief.
 """
 
-MODEL = os.environ["MODEL"]
+MODEL = os.environ.get("MODEL", "claude-3-5-haiku-20241022")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 db = dataset.connect(DATABASE_URL)
