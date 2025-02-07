@@ -8,17 +8,20 @@ import os
 import re
 from datetime import UTC, datetime
 from discord.ext.commands import Context, CheckFailure
+import logging
 
 import dataset
 import discord
 from discord import Member
 from discord.ext import commands
 from loguru import logger
-from promptic import llm
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_fixed, before_sleep_log
 from enum import IntEnum
 import httpx
+from langfuse.openai import openai
+from langfuse.decorators import observe
+from promptic import Promptic
 
 TRANSCRIPT_API_TOKEN = os.environ["TRANSCRIPT_API_TOKEN"]
 WEB_SUMMARY_API_TOKEN = os.environ["WEB_SUMMARY_API_TOKEN"]
@@ -45,6 +48,19 @@ karma_table = db["karma"]
 channels_table = db["channels"]
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
+
+os.environ["OPENAI_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+
+# Initialize Promptic with Langfuse OpenAI client
+promptic = Promptic(
+    openai_client=openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ["OPENROUTER_API_KEY"],
+    ),
+    # system=SYSTEM,
+    # model=MODEL,
+    # debug=True,
+)
 
 
 class VerbosityLevel(IntEnum):
@@ -92,9 +108,14 @@ async def check_is_command_message(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
-    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+    before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@llm(system=SYSTEM, model=MODEL, max_tokens=500)
+@observe
+@promptic.llm(
+    max_tokens=500,
+    system=SYSTEM,
+    model=MODEL,
+)
 def respond_to_chat(
     chat_history: str,
     guild_name: str,
@@ -114,9 +135,13 @@ def respond_to_chat(
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
-    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+    before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@llm(system=SYSTEM, model=MODEL)
+@observe
+@promptic.llm(
+    system=SYSTEM,
+    model=MODEL,
+)
 def respond_to_karma(username: str, change: int, total: int) -> str:
     """
     Announce the change in karma to the chat in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.
@@ -130,9 +155,13 @@ def respond_to_karma(username: str, change: int, total: int) -> str:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
-    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+    before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@llm(system=SYSTEM, model=MODEL)
+@observe
+@promptic.llm(
+    system=SYSTEM,
+    model=MODEL,
+)
 def generate_welcome_message(username: str) -> str:
     """
     Generate a warm and friendly welcome message for a new user joining the Orange County AI Discord server.
@@ -168,9 +197,14 @@ def extract_url(content: str) -> str | None:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
-    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+    before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@llm(system=SYSTEM, model=MODEL, max_tokens=300)
+@observe
+@promptic.llm(
+    max_tokens=300,
+    system=SYSTEM,
+    model=MODEL,
+)
 def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
     Summarize the following YouTube video transcript in a concise manner. Focus on the main points and key takeaways.
@@ -184,7 +218,7 @@ def summarize_youtube_video(transcript: str, video_title: str) -> str:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
-    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+    before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
 async def get_video_summary(video_id: str) -> str | None:
     try:
@@ -227,7 +261,7 @@ async def get_video_summary(video_id: str) -> str | None:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
-    before_sleep=before_sleep_log(logger, log_level=logger.warning),
+    before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
 def get_web_summary(url: str) -> str | None:
     try:
