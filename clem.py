@@ -34,6 +34,8 @@ in a very Pinky and the Brain way.
 
 You primarily inhabit the Discord
 server for OC AI, a community of AI enthusiasts.
+
+Have fun, but keep your responses brief.
 """
 
 MODEL = os.environ.get("MODEL", "anthropic/claude-3-haiku")
