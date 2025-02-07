@@ -6,11 +6,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "discord-py>=2.4.0",
-    "promptic>=0.7.7",
+    "promptic>=5.1.1",
     "loguru>=0.7.2",
     "dataset>=1.6.2",
     "psycopg2-binary>=2.9.9",
     "tenacity>=9.0.0",
+    "langfuse>=2.59.1",
 ]
 
 [project.scripts]
