@@ -34,11 +34,9 @@ in a very Pinky and the Brain way.
 
 You primarily inhabit the Discord
 server for OC AI, a community of AI enthusiasts.
-
-Have fun, but keep your responses brief.
 """
 
-MODEL = os.environ.get("MODEL", "claude-3-5-haiku-20241022")
+MODEL = os.environ.get("MODEL", "anthropic/claude-3-haiku")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 db = dataset.connect(DATABASE_URL)
@@ -49,17 +47,15 @@ channels_table = db["channels"]
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
-os.environ["OPENAI_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+openai_client = openai.OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ["OPENROUTER_API_KEY"],
+)
 
-# Initialize Promptic with Langfuse OpenAI client
 promptic = Promptic(
-    openai_client=openai.OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
-    ),
-    # system=SYSTEM,
-    # model=MODEL,
-    # debug=True,
+    openai_client=openai_client,
+    system=SYSTEM,
+    model=MODEL,
 )
 
 
@@ -111,11 +107,7 @@ async def check_is_command_message(
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
 @observe
-@promptic.llm(
-    max_tokens=500,
-    system=SYSTEM,
-    model=MODEL,
-)
+@promptic.llm(max_tokens=500)
 def respond_to_chat(
     chat_history: str,
     guild_name: str,
@@ -138,10 +130,7 @@ def respond_to_chat(
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
 @observe
-@promptic.llm(
-    system=SYSTEM,
-    model=MODEL,
-)
+@promptic.llm
 def respond_to_karma(username: str, change: int, total: int) -> str:
     """
     Announce the change in karma to the chat in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.
@@ -158,10 +147,7 @@ def respond_to_karma(username: str, change: int, total: int) -> str:
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
 @observe
-@promptic.llm(
-    system=SYSTEM,
-    model=MODEL,
-)
+@promptic.llm
 def generate_welcome_message(username: str) -> str:
     """
     Generate a warm and friendly welcome message for a new user joining the Orange County AI Discord server.
@@ -200,11 +186,7 @@ def extract_url(content: str) -> str | None:
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
 @observe
-@promptic.llm(
-    max_tokens=300,
-    system=SYSTEM,
-    model=MODEL,
-)
+@promptic.llm(max_tokens=300)
 def summarize_youtube_video(transcript: str, video_title: str) -> str:
     """
     Summarize the following YouTube video transcript in a concise manner. Focus on the main points and key takeaways.
