@@ -22,6 +22,11 @@ from promptic import Promptic
 from pydantic import BaseModel
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_fixed
 
+import sentry_sdk
+
+if sentry_dsn := os.environ.get("SENTRY_DSN"):
+    sentry_sdk.init(sentry_dsn)
+
 TRANSCRIPT_API_TOKEN = os.environ["TRANSCRIPT_API_TOKEN"]
 WEB_SUMMARY_API_TOKEN = os.environ["WEB_SUMMARY_API_TOKEN"]
 
