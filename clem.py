@@ -244,30 +244,23 @@ async def get_video_summary(video_id: str) -> str | None:
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
 def get_web_summary(url: str) -> str | None:
-    try:
-        response = httpx.post(
-            "https://windmill.knowsuchagency.com/api/w/default/jobs/run_wait_result/p/u/stephan/web_summarizer",
-            json={"url": url},
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {WEB_SUMMARY_API_TOKEN}",
-            },
-            timeout=90,
-        )
+    response = httpx.post(
+        "https://windmill.knowsuchagency.com/api/w/default/jobs/run_wait_result/p/u/stephan/web_summarizer",
+        json={"url": url},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {WEB_SUMMARY_API_TOKEN}",
+        },
+        timeout=90,
+    )
 
-        response.raise_for_status()
-        result = response.json()
+    response.raise_for_status()
+    result = response.json()
 
-        if result.get("error"):
-            logger.error(f"Error summarizing webpage: {result.get('error')}")
-            return None
+    if isinstance(result, dict) and (error := result.get("error")):
+        raise Exception(error)
 
-        return result
-
-    except Exception as e:
-        logger.error(f"Error summarizing webpage: {e}")
-        logger.exception(e)
-        return None
+    return result
 
 
 @bot.event
