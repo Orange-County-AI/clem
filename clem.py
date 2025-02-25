@@ -257,6 +257,11 @@ def get_web_summary(url: str) -> str | None:
 
         response.raise_for_status()
         result = response.json()
+
+        if result.get("error"):
+            logger.error(f"Error summarizing webpage: {result.get('error')}")
+            return None
+
         return result
 
     except Exception as e:
