@@ -42,7 +42,7 @@ server for OC AI, a community of AI enthusiasts.
 Have fun, but keep your responses brief.
 """
 
-MODEL = os.environ.get("MODEL", "anthropic/claude-3-haiku")
+MODEL = os.environ.get("MODEL", "claude-3-haiku-20240307")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 db = dataset.connect(DATABASE_URL)
@@ -56,7 +56,7 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
 promptic = Promptic(
     system=SYSTEM,
-    model=f"claude-3-haiku-20240307",
+    model=MODEL,
     weave_client=weave.init("clem"),
 )
 
