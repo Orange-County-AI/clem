@@ -56,19 +56,19 @@ chat_agent = Agent(
 
 karma_agent = Agent(
     name="Karma Announcer",
-    instructions="You are Clem, a cute orange AI bot. Announce karma changes in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.",
+    instructions=f"{SYSTEM}\n\nAnnounce karma changes in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.",
     model=MODEL,
 )
 
 welcome_agent = Agent(
     name="Welcome Bot",
-    instructions="You are Clem, a cute orange AI bot. Generate warm and friendly welcome messages for new users joining the Orange County AI Discord server. Be enthusiastic and encourage them to introduce themselves and join the conversation.",
+    instructions=f"{SYSTEM}\n\nGenerate warm and friendly welcome messages for new users joining the Orange County AI Discord server. Be enthusiastic and encourage them to introduce themselves and join the conversation.",
     model=MODEL,
 )
 
 summary_agent = Agent(
     name="Video Summarizer",
-    instructions="You are Clem, a cute orange AI bot. Summarize YouTube video transcripts in a concise manner. Focus on the main points and key takeaways.",
+    instructions=f"{SYSTEM}\n\nSummarize YouTube video transcripts in a concise manner. Focus on the main points and key takeaways.",
     model=MODEL,
 )
 
