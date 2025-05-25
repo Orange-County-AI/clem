@@ -14,6 +14,7 @@ import dataset
 import discord
 import httpx
 from agents import Agent, Runner
+from agents.model_settings import ModelSettings
 from discord import Member
 from discord.ext import commands
 from discord.ext.commands import CheckFailure, Context
@@ -52,24 +53,28 @@ chat_agent = Agent(
     name="Clem Chat Assistant",
     instructions=SYSTEM,
     model=MODEL,
+    model_settings=ModelSettings(max_tokens=300),
 )
 
 karma_agent = Agent(
     name="Karma Announcer",
     instructions=f"{SYSTEM}\n\nAnnounce karma changes in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.",
     model=MODEL,
+    model_settings=ModelSettings(max_tokens=100),
 )
 
 welcome_agent = Agent(
     name="Welcome Bot",
     instructions=f"{SYSTEM}\n\nGenerate warm and friendly welcome messages for new users joining the Orange County AI Discord server. Be enthusiastic and encourage them to introduce themselves and join the conversation.",
     model=MODEL,
+    model_settings=ModelSettings(max_tokens=150),
 )
 
 summary_agent = Agent(
     name="Video Summarizer",
-    instructions=f"{SYSTEM}\n\nSummarize YouTube video transcripts in a concise manner. Focus on the main points and key takeaways.",
+    instructions=f"{SYSTEM}\n\nSummarize YouTube video transcripts in a concise manner. Focus on the main points and key takeaways. Keep the summary brief and under 300 words.",
     model=MODEL,
+    model_settings=ModelSettings(max_tokens=300),
 )
 
 
