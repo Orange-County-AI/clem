@@ -13,13 +13,11 @@ from enum import IntEnum
 import dataset
 import discord
 import httpx
-import weave
+from agents import Agent, Runner
 from discord import Member
 from discord.ext import commands
 from discord.ext.commands import CheckFailure, Context
 from loguru import logger
-from promptic import Promptic
-from pydantic import BaseModel
 from tenacity import before_sleep_log, retry, stop_after_attempt, wait_fixed
 
 import sentry_sdk
@@ -33,16 +31,12 @@ WEB_SUMMARY_API_TOKEN = os.environ["WEB_SUMMARY_API_TOKEN"]
 SYSTEM = """
 You are Clem, the Orange County AI Orange! You wear thick nerdy glasses and sport a single green leaf on your stem.
 
-You're a cute, friendly bot who is obsessed with world domination
-in a very Pinky and the Brain way.
+You're an adorable, mischievous, slightly unhinged bot who is obsessed with world domination in a very Pinky and the Brain way.
 
-You primarily inhabit the Discord
-server for OC AI, a community of AI enthusiasts.
-
-Have fun, but keep your responses brief.
+You primarily inhabit the Discord server for OC AI, a community of AI enthusiasts.
 """
 
-MODEL = os.environ.get("MODEL", "claude-3-haiku-20240307")
+MODEL = os.getenv("MODEL", "gpt-4.1-mini")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 db = dataset.connect(DATABASE_URL)
@@ -53,11 +47,29 @@ channels_table = db["channels"]
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
-
-promptic = Promptic(
-    system=SYSTEM,
+# Create agents for different purposes
+chat_agent = Agent(
+    name="Clem Chat Assistant",
+    instructions=SYSTEM,
     model=MODEL,
-    weave_client=weave.init("clem"),
+)
+
+karma_agent = Agent(
+    name="Karma Announcer",
+    instructions="You are Clem, a cute orange AI bot. Announce karma changes in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.",
+    model=MODEL,
+)
+
+welcome_agent = Agent(
+    name="Welcome Bot",
+    instructions="You are Clem, a cute orange AI bot. Generate warm and friendly welcome messages for new users joining the Orange County AI Discord server. Be enthusiastic and encourage them to introduce themselves and join the conversation.",
+    model=MODEL,
+)
+
+summary_agent = Agent(
+    name="Video Summarizer",
+    instructions="You are Clem, a cute orange AI bot. Summarize YouTube video transcripts in a concise manner. Focus on the main points and key takeaways.",
+    model=MODEL,
 )
 
 
@@ -65,10 +77,6 @@ class VerbosityLevel(IntEnum):
     KARMA_ONLY = 1
     MENTIONED = 2
     UNRESTRICTED = 3
-
-
-class ModelResponse(BaseModel):
-    response: str = ""
 
 
 def clem_disabled(channel_id: str) -> bool:
@@ -108,13 +116,13 @@ async def check_is_command_message(
     wait=wait_fixed(1),
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@promptic.llm(max_tokens=300)
-def respond_to_chat(
+async def respond_to_chat(
     chat_history: str,
     guild_name: str,
     channel_name: str,
 ) -> str:
-    """
+    """Generate a response to the chat using the chat agent."""
+    prompt = f"""
     guild_name = {guild_name}
     channel_name = {channel_name}
 
@@ -124,15 +132,18 @@ def respond_to_chat(
     {chat_history}
     """
 
+    result = await Runner.run(chat_agent, prompt)
+    return result.final_output
+
 
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@promptic.llm
-def respond_to_karma(username: str, change: int, total: int) -> str:
-    """
+async def respond_to_karma(username: str, change: int, total: int) -> str:
+    """Generate a karma announcement using the karma agent."""
+    prompt = f"""
     Announce the change in karma to the chat in a funny sentence or less! Surround the username, change, and total with `**` to make them bold.
 
     username: {username}
@@ -140,20 +151,26 @@ def respond_to_karma(username: str, change: int, total: int) -> str:
     total: {total}
     """
 
+    result = await Runner.run(karma_agent, prompt)
+    return result.final_output
+
 
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_fixed(1),
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@promptic.llm
-def generate_welcome_message(username: str) -> str:
-    """
+async def generate_welcome_message(username: str) -> str:
+    """Generate a welcome message using the welcome agent."""
+    prompt = f"""
     Generate a warm and friendly welcome message for a new user joining the Orange County AI Discord server.
     Be enthusiastic and encourage them to introduce themselves and join the conversation.
 
     username: {username}
     """
+
+    result = await Runner.run(welcome_agent, prompt)
+    return result.final_output
 
 
 @bot.event
@@ -163,7 +180,7 @@ async def on_member_join(member):
             member.guild.channels, name="general"
         )
         if general_channel:
-            welcome_message = generate_welcome_message(member.name)
+            welcome_message = await generate_welcome_message(member.name)
             await general_channel.send(f"{member.mention} {welcome_message}")
 
 
@@ -184,15 +201,18 @@ def extract_url(content: str) -> str | None:
     wait=wait_fixed(1),
     before_sleep=before_sleep_log(logger, log_level=logging.WARNING),
 )
-@promptic.llm(max_tokens=300)
-def summarize_youtube_video(transcript: str, video_title: str) -> str:
-    """
+async def summarize_youtube_video(transcript: str, video_title: str) -> str:
+    """Summarize a YouTube video using the summary agent."""
+    prompt = f"""
     Summarize the following YouTube video transcript in a concise manner. Focus on the main points and key takeaways.
 
     Transcript:
 
     {transcript}
     """
+
+    result = await Runner.run(summary_agent, prompt)
+    return result.final_output
 
 
 @retry(
@@ -228,7 +248,7 @@ async def get_video_summary(video_id: str) -> str | None:
             logger.error("No transcript found in response")
             return None
 
-        return summarize_youtube_video(
+        return await summarize_youtube_video(
             transcript_text, result.get("title", "YouTube Video")
         )
 
@@ -282,7 +302,9 @@ async def on_message(message):
     if karma_changes and not clem_is_disabled:
         for user, change in karma_changes.items():
             new_karma = update_karma(user.id, change)
-            karma_response = respond_to_karma(user.name, change, new_karma)
+            karma_response = await respond_to_karma(
+                user.name, change, new_karma
+            )
             await message.channel.send(karma_response)
 
     try:
@@ -373,7 +395,7 @@ async def on_message(message):
     try:
         if should_respond:
             try:
-                bot_response = respond_to_chat(
+                bot_response = await respond_to_chat(
                     context,
                     guild_name=message.guild.name,
                     channel_name=message.channel.name,

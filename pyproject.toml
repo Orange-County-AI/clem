@@ -1,27 +1,26 @@
 [project]
-name = "clem"
-version = "0.1.0"
+dependencies = [
+  "discord-py>=2.4.0",
+  "loguru>=0.7.2",
+  "dataset>=1.6.2",
+  "psycopg2-binary>=2.9.9",
+  "tenacity>=9.0.0",
+  "langfuse>=2.59.1",
+  "sentry-sdk>=2.20.0",
+  "openai-agents>=0.0.16",
+]
 description = "Add your description here"
+name = "clem"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = [
-    "discord-py>=2.4.0",
-    "promptic>=5.2.1",
-    "loguru>=0.7.2",
-    "dataset>=1.6.2",
-    "psycopg2-binary>=2.9.9",
-    "tenacity>=9.0.0",
-    "langfuse>=2.59.1",
-    "weave>=0.51.33",
-    "sentry-sdk>=2.20.0",
-]
+version = "0.1.0"
 
 [project.scripts]
 clem = "clem:main"
 
 [build-system]
-requires = ["hatchling"]
 build-backend = "hatchling.build"
+requires = ["hatchling"]
 
 [tool.ruff]
 line-length = 79
