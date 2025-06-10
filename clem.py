@@ -39,9 +39,7 @@ You primarily inhabit the Discord server for OC AI, a community of AI enthusiast
 """
 
 MODEL = os.getenv("MODEL", "gpt-4.1-mini")
-MEILISEARCH_URL = os.getenv(
-    "MEILISEARCH_URL", "https://meilisearch.knowsuchagency.com"
-)
+MEILISEARCH_URL = os.getenv("MEILISEARCH_URL", "http://localhost:7700")
 MEILISEARCH_API_KEY = os.getenv("MEILISEARCH_API_KEY")
 
 # Initialize MeiliSearch client
