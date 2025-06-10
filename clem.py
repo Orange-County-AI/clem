@@ -9,10 +9,11 @@ import os
 import re
 from datetime import UTC, datetime
 from enum import IntEnum
+import hashlib
 
-import dataset
 import discord
 import httpx
+import meilisearch
 from agents import Agent, Runner
 from agents.model_settings import ModelSettings
 from discord import Member
@@ -38,13 +39,482 @@ You primarily inhabit the Discord server for OC AI, a community of AI enthusiast
 """
 
 MODEL = os.getenv("MODEL", "gpt-4.1-mini")
-DATABASE_URL = os.getenv("DATABASE_URL")
+MEILISEARCH_URL = os.getenv("MEILISEARCH_URL", "http://localhost:7700")
+MEILISEARCH_API_KEY = os.getenv("MEILISEARCH_API_KEY")
 
-db = dataset.connect(DATABASE_URL)
+# Initialize MeiliSearch client
+logger.info(f"Initializing MeiliSearch client with URL: {MEILISEARCH_URL}")
+client = meilisearch.Client(MEILISEARCH_URL, MEILISEARCH_API_KEY)
 
-messages_table = db["messages"]
-karma_table = db["karma"]
-channels_table = db["channels"]
+# Test connection
+try:
+    health = client.health()
+    logger.info(f"MeiliSearch health check: {health}")
+except Exception as e:
+    logger.error(f"MeiliSearch health check failed: {e}")
+
+# Create indices
+logger.info("Creating MeiliSearch indices...")
+messages_index = client.index("ocai_messages")
+karma_index = client.index("ocai_karma")
+channels_index = client.index("ocai_channels")
+
+# Log index information
+try:
+    messages_stats = messages_index.get_stats()
+    logger.info(f"Messages index stats: {messages_stats}")
+except Exception as e:
+    logger.error(f"Failed to get messages index stats: {e}")
+
+try:
+    karma_stats = karma_index.get_stats()
+    logger.info(f"Karma index stats: {karma_stats}")
+except Exception as e:
+    logger.error(f"Failed to get karma index stats: {e}")
+
+try:
+    channels_stats = channels_index.get_stats()
+    logger.info(f"Channels index stats: {channels_stats}")
+except Exception as e:
+    logger.error(f"Failed to get channels index stats: {e}")
+
+
+# Configure indices with better error handling
+def configure_index_safely(index, index_name, primary_key, config_func):
+    """Safely configure a MeiliSearch index with proper error handling"""
+    try:
+        # First check if index exists and get primary key
+        try:
+            current_pk = index.get_primary_key()
+            if current_pk is None:
+                logger.info(
+                    f"Setting primary key for {index_name} index to '{primary_key}'"
+                )
+                # Use the HTTP client to update primary key via PATCH request
+                response = client.http.patch(
+                    f"/indexes/{index.uid}", {"primaryKey": primary_key}
+                )
+                logger.info(f"Primary key update response: {response}")
+            else:
+                logger.info(
+                    f"{index_name} index already has primary key: {current_pk}"
+                )
+        except Exception as pk_error:
+            logger.warning(
+                f"Primary key check/set for {index_name} failed: {pk_error}"
+            )
+            # Try to continue with configuration
+
+        # Apply additional configuration
+        config_func(index)
+
+        logger.info(f"Successfully configured {index_name} index")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to configure {index_name} index: {e}")
+        # For primary key errors, this is critical - we should fail fast
+        if "primary" in str(e).lower():
+            logger.error(
+                f"Primary key configuration failed for {index_name} - this will cause document insertion failures"
+            )
+        return False
+
+
+def configure_messages_index(index):
+    """Configure messages index attributes"""
+    try:
+        # Update settings using the settings endpoint
+        settings = {
+            "searchableAttributes": ["content", "author"],
+            "filterableAttributes": ["channel_id", "author", "timestamp"],
+            "sortableAttributes": ["timestamp"],
+        }
+        index.update_settings(settings)
+        logger.info("Messages index settings updated successfully")
+    except Exception as e:
+        logger.error(f"Failed to update messages index settings: {e}")
+        raise
+
+
+def configure_karma_index(index):
+    """Configure karma index attributes"""
+    try:
+        settings = {
+            "filterableAttributes": ["user_id"],
+            "sortableAttributes": ["karma"],
+        }
+        index.update_settings(settings)
+        logger.info("Karma index settings updated successfully")
+    except Exception as e:
+        logger.error(f"Failed to update karma index settings: {e}")
+        raise
+
+
+def configure_channels_index(index):
+    """Configure channels index attributes"""
+    try:
+        settings = {
+            "filterableAttributes": [
+                "channel_id",
+                "disabled",
+                "verbosity_level",
+            ]
+        }
+        index.update_settings(settings)
+        logger.info("Channels index settings updated successfully")
+    except Exception as e:
+        logger.error(f"Failed to update channels index settings: {e}")
+        raise
+
+
+# Configure all indices with retry logic
+import time
+
+
+def configure_all_indices_with_retry(max_retries=3):
+    """Configure all indices with retry logic"""
+    for attempt in range(max_retries):
+        logger.info(
+            f"Configuring indices (attempt {attempt + 1}/{max_retries})"
+        )
+
+        messages_configured = configure_index_safely(
+            messages_index, "messages", "id", configure_messages_index
+        )
+        karma_configured = configure_index_safely(
+            karma_index, "karma", "id", configure_karma_index
+        )
+        channels_configured = configure_index_safely(
+            channels_index, "channels", "id", configure_channels_index
+        )
+
+        if all([messages_configured, karma_configured, channels_configured]):
+            logger.info("All indices configured successfully")
+            return True
+
+        if attempt < max_retries - 1:
+            logger.warning(
+                f"Some indices failed to configure, retrying in 2 seconds..."
+            )
+            time.sleep(2)
+
+    logger.error("Failed to configure all indices after all retry attempts")
+    return False
+
+
+# Configure indices
+indices_configured = configure_all_indices_with_retry()
+if not indices_configured:
+    logger.error(
+        "Critical: Indices configuration failed - message storage may not work properly"
+    )
+
+
+# Helper functions for MeiliSearch operations
+def generate_message_id(author: str, timestamp: datetime, content: str) -> str:
+    """Generate a unique ID for a message"""
+    content_hash = hashlib.md5(
+        f"{author}{timestamp.isoformat()}{content}".encode()
+    ).hexdigest()[:8]
+    return f"{int(timestamp.timestamp())}_{content_hash}"
+
+
+def wait_for_task_completion(task_uid: int, timeout_ms: int = 5000) -> dict:
+    """Wait for a MeiliSearch task to complete using the client's wait_for_task method"""
+    try:
+        logger.info(f"Waiting for task {task_uid} to complete...")
+        # Use MeiliSearch client's built-in wait_for_task method
+        task = client.wait_for_task(task_uid, timeout_in_ms=timeout_ms)
+        # Convert to dict if it's an object
+        task_dict = (
+            task
+            if isinstance(task, dict)
+            else task.__dict__
+            if hasattr(task, "__dict__")
+            else {}
+        )
+        logger.info(
+            f"Task {task_uid} completed with status: {task_dict.get('status', 'unknown')}"
+        )
+        return task_dict
+    except Exception as e:
+        logger.error(f"Error waiting for task {task_uid}: {e}")
+        return {}
+
+
+def check_task_status(task_uid: int) -> dict:
+    """Check the status of a MeiliSearch task"""
+    try:
+        task = client.get_task(task_uid)
+        # Convert to dict if it's an object
+        task_dict = (
+            task
+            if isinstance(task, dict)
+            else task.__dict__
+            if hasattr(task, "__dict__")
+            else {}
+        )
+        logger.info(f"Task {task_uid} status: {task_dict}")
+        return task_dict
+    except Exception as e:
+        logger.error(f"Error checking task {task_uid}: {e}")
+        return {}
+
+
+def store_message(
+    author: str, content: str, channel_id: str, model: str = None
+):
+    """Store a message in MeiliSearch"""
+    timestamp = datetime.now(UTC)
+    doc = {
+        "id": generate_message_id(author, timestamp, content),
+        "author": author,
+        "content": content,
+        "timestamp": int(timestamp.timestamp()),
+        "channel_id": channel_id,
+    }
+    if model:
+        doc["model"] = model
+
+    logger.info(
+        f"Attempting to store message: ID={doc['id']}, Author={author}, Channel={channel_id}"
+    )
+    logger.debug(f"Document to store: {doc}")
+
+    try:
+        # Check if the index has a primary key set - if not, try to set it
+        try:
+            index_info = messages_index.get_primary_key()
+            if index_info is None:
+                logger.warning(
+                    "Messages index has no primary key set, attempting to set it"
+                )
+                # Use HTTP client to update primary key
+                response = client.http.patch(
+                    f"/indexes/{messages_index.uid}", {"primaryKey": "id"}
+                )
+                logger.info(
+                    f"Successfully set primary key for messages index: {response}"
+                )
+        except Exception as pk_error:
+            logger.error(
+                f"Could not verify/set primary key for messages index: {pk_error}"
+            )
+            # Continue anyway - the add_documents call will give us the specific error
+
+        # MeiliSearch add_documents returns a task object with information about the operation
+        task = messages_index.add_documents([doc])
+        logger.info(f"MeiliSearch add_documents returned task: {task}")
+
+        # Convert task to dict if it's not already
+        task_dict = (
+            task
+            if isinstance(task, dict)
+            else task.__dict__
+            if hasattr(task, "__dict__")
+            else {}
+        )
+
+        # Log task details - MeiliSearch Python client uses snake_case
+        task_uid = None
+        if "task_uid" in task_dict:
+            task_uid = task_dict["task_uid"]
+            logger.info(f"Task UID: {task_uid}")
+        elif "taskUid" in task_dict:
+            task_uid = task_dict["taskUid"]
+            logger.info(f"Task UID: {task_uid}")
+        else:
+            logger.warning(f"No task_uid found in response: {task_dict}")
+
+        if "status" in task_dict:
+            logger.info(f"Initial task status: {task_dict['status']}")
+        if "error" in task_dict:
+            logger.error(f"Task error: {task_dict['error']}")
+            return False
+
+        # Wait for task completion if we have a task_uid
+        if task_uid:
+            # Use the built-in wait_for_task method
+            final_task_status = wait_for_task_completion(
+                task_uid, timeout_ms=5000
+            )
+
+            status = final_task_status.get("status", "unknown")
+            if status == "succeeded":
+                logger.info(
+                    f"Message storage task {task_uid} completed successfully"
+                )
+                return True
+            elif status == "failed":
+                error_info = final_task_status.get("error", "No error details")
+                logger.error(
+                    f"Message storage task {task_uid} failed: {error_info}"
+                )
+
+                # Check if this is a primary key error and try to recover
+                if (
+                    isinstance(error_info, dict)
+                    and "primary_key" in str(error_info).lower()
+                ):
+                    logger.error(
+                        "Primary key error detected - the index may need to be reset"
+                    )
+                    logger.error(
+                        "Consider using the !reset_indices command to fix this issue"
+                    )
+
+                return False
+            else:
+                logger.warning(
+                    f"Message storage task {task_uid} finished with unexpected status: {status}"
+                )
+                return False
+
+        return True
+    except Exception as e:
+        logger.error(f"Error storing message: {e}")
+        logger.exception("Full exception details:")
+        return False
+
+
+def get_channel_messages(channel_id: str, limit: int = 100):
+    """Get recent messages for a channel"""
+    try:
+        logger.debug(
+            f"Searching for messages in channel {channel_id} with limit {limit}"
+        )
+        result = messages_index.search(
+            "",
+            {
+                "filter": f"channel_id = '{channel_id}'",
+                "sort": ["timestamp:desc"],
+                "limit": limit,
+            },
+        )
+        logger.info(
+            f"Search returned {len(result['hits'])} messages for channel {channel_id}"
+        )
+        logger.debug(f"Search result: {result}")
+
+        # Convert timestamp back to datetime and reverse order (oldest first)
+        messages = []
+        for hit in reversed(result["hits"]):
+            hit["timestamp"] = datetime.fromtimestamp(hit["timestamp"], UTC)
+            messages.append(hit)
+        return messages
+    except Exception as e:
+        logger.error(
+            f"Error retrieving messages for channel {channel_id}: {e}"
+        )
+        logger.exception("Full exception details for message retrieval:")
+        return []
+
+
+def get_user_karma(user_id: str) -> int:
+    """Get user's karma"""
+    try:
+        result = karma_index.search(
+            "",
+            {
+                "filter": f"user_id = '{user_id}'",
+                "limit": 1,
+            },
+        )
+        if result["hits"]:
+            return result["hits"][0]["karma"]
+        return 0
+    except Exception as e:
+        logger.error(f"Error retrieving karma: {e}")
+        return 0
+
+
+def update_user_karma(user_id: str, change: int) -> int:
+    """Update user's karma and return new total"""
+    current_karma = get_user_karma(user_id)
+    new_karma = current_karma + change
+
+    doc = {
+        "id": user_id,
+        "user_id": user_id,
+        "karma": new_karma,
+    }
+
+    try:
+        karma_index.add_documents([doc])
+        return new_karma
+    except Exception as e:
+        logger.error(f"Error updating karma: {e}")
+        return current_karma
+
+
+def get_channel_config(channel_id: str):
+    """Get channel configuration"""
+    try:
+        result = channels_index.search(
+            "",
+            {
+                "filter": f"channel_id = '{channel_id}'",
+                "limit": 1,
+            },
+        )
+        if result["hits"]:
+            return result["hits"][0]
+        return None
+    except Exception as e:
+        logger.error(f"Error retrieving channel config: {e}")
+        return None
+
+
+def update_channel_config(
+    channel_id: str, disabled: bool = None, verbosity_level: int = None
+):
+    """Update channel configuration"""
+    current_config = get_channel_config(channel_id) or {}
+
+    doc = {
+        "id": channel_id,
+        "channel_id": channel_id,
+        "disabled": (
+            disabled
+            if disabled is not None
+            else current_config.get("disabled", False)
+        ),
+        "verbosity_level": (
+            verbosity_level
+            if verbosity_level is not None
+            else current_config.get("verbosity_level", 2)
+        ),
+    }
+
+    try:
+        channels_index.add_documents([doc])
+        return True
+    except Exception as e:
+        logger.error(f"Error updating channel config: {e}")
+        return False
+
+
+def delete_channel_messages(channel_id: str):
+    """Delete all messages for a channel"""
+    try:
+        # Get all message IDs for the channel
+        result = messages_index.search(
+            "",
+            {
+                "filter": f"channel_id = '{channel_id}'",
+                "limit": 10000,  # Adjust if needed
+                "attributesToRetrieve": ["id"],
+            },
+        )
+
+        message_ids = [hit["id"] for hit in result["hits"]]
+        if message_ids:
+            messages_index.delete_documents(message_ids)
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting channel messages: {e}")
+        return False
+
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
@@ -85,12 +555,12 @@ class VerbosityLevel(IntEnum):
 
 
 def clem_disabled(channel_id: str) -> bool:
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     return channel and channel.get("disabled", False)
 
 
 def karma_only(channel_id: str) -> bool:
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     return (
         channel
         and channel.get("verbosity_level", VerbosityLevel.MENTIONED)
@@ -99,7 +569,7 @@ def karma_only(channel_id: str) -> bool:
 
 
 def get_verbosity_level(channel_id: str) -> VerbosityLevel:
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     return (
         VerbosityLevel(
             channel.get("verbosity_level", VerbosityLevel.MENTIONED)
@@ -319,18 +789,21 @@ async def on_message(message):
             content = content.replace(f"<@{user.id}>", f"@{user.name}")
             content = content.replace(f"<@!{user.id}>", f"@{user.name}")
 
-        row = {
-            "author": message.author.name,  # Store only the username
-            "content": content,
-            "timestamp": datetime.now(UTC),
-            "channel_id": channel_id,
-        }
-        if is_bot_message:
-            row["model"] = MODEL
-        messages_table.insert(row)
-        print("Message stored successfully")
+        model = MODEL if is_bot_message else None
+        logger.debug(
+            f"About to store message - Author: {message.author.name}, Content length: {len(content)}, Channel: {channel_id}, Model: {model}"
+        )
+
+        success = store_message(
+            message.author.name, content, channel_id, model
+        )
+        if success:
+            logger.info("Message stored successfully in MeiliSearch")
+        else:
+            logger.error("Failed to store message in MeiliSearch")
     except Exception as e:
-        print(f"Error storing message: {e}")
+        logger.error(f"Exception while storing message: {e}")
+        logger.exception("Full exception details for message storage:")
 
     await bot.process_commands(message)
 
@@ -371,15 +844,7 @@ async def on_message(message):
             logger.error("Failed to get web page summary")
         return
 
-    chat_history = list(
-        messages_table.find(
-            channel_id=channel_id,
-            order_by=["-timestamp"],
-            _limit=100,
-        )
-    )
-
-    chat_history.reverse()
+    chat_history = get_channel_messages(channel_id, 100)
 
     # Format messages for context, using only usernames
     context = "\n".join(
@@ -460,16 +925,7 @@ def process_karma(content: str, mentions: list[Member]) -> dict[Member, int]:
 
 
 def update_karma(user_id: int, change: int) -> int:
-    user_karma = karma_table.find_one(user_id=str(user_id))
-    if user_karma:
-        new_karma = user_karma["karma"] + change
-        karma_table.update(
-            dict(user_id=str(user_id), karma=new_karma), ["user_id"]
-        )
-    else:
-        new_karma = change
-        karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
-    return new_karma
+    return update_user_karma(str(user_id), change)
 
 
 @bot.event
@@ -500,13 +956,11 @@ def is_clementine_council():
 async def toggle_clem(ctx):
     channel_id = str(ctx.channel.id)
 
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     current_state = channel and channel.get("disabled", False)
     new_state = not current_state
 
-    channels_table.upsert(
-        dict(channel_id=channel_id, disabled=new_state), ["channel_id"]
-    )
+    update_channel_config(channel_id, disabled=new_state)
 
     status = "disabled" if new_state else "enabled"
     await ctx.send(f"Clem has been {status} in this channel.")
@@ -523,9 +977,7 @@ async def set_verbosity(ctx, level: int):
 
     channel_id = str(ctx.channel.id)
 
-    channels_table.upsert(
-        dict(channel_id=channel_id, verbosity_level=level), ["channel_id"]
-    )
+    update_channel_config(channel_id, verbosity_level=level)
 
     verbosity_descriptions = {
         1: "Karma changes only",
@@ -546,14 +998,42 @@ async def reset_chat(ctx):
     channel_id = str(ctx.channel.id)
 
     try:
-        messages_table.delete(channel_id=channel_id)
-        await ctx.send("Chat history for this channel has been reset.")
-        logger.info(f"Chat history reset for channel {channel_id}")
+        success = delete_channel_messages(channel_id)
+        if success:
+            await ctx.send("Chat history for this channel has been reset.")
+            logger.info(f"Chat history reset for channel {channel_id}")
+        else:
+            await ctx.send(
+                "An error occurred while resetting the chat history."
+            )
     except Exception as e:
         await ctx.send("An error occurred while resetting the chat history.")
         logger.error(
             f"Error resetting chat history for channel {channel_id}: {e}"
         )
+
+
+@bot.hybrid_command(description="Show message count for this channel.")
+@is_clementine_council()
+async def message_count(ctx):
+    """Show how many messages are stored for this channel"""
+    channel_id = str(ctx.channel.id)
+
+    try:
+        messages = get_channel_messages(
+            channel_id, 1000
+        )  # Get more messages to count
+        await ctx.send(f"📊 This channel has {len(messages)} stored messages")
+
+        if messages:
+            latest = messages[-1]  # Last message (most recent)
+            await ctx.send(
+                f"🕐 Latest stored message: {latest['author']} at {latest['timestamp']}"
+            )
+
+    except Exception as e:
+        await ctx.send(f"❌ Error getting message count: {e}")
+        logger.error(f"Message count error: {e}")
 
 
 @bot.event

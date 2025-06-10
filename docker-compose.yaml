@@ -1,10 +1,25 @@
 services:
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    ports:
+      - "7700:7700"
+    environment:
+      MEILI_ENV: development
+    volumes:
+      - meilisearch_data:/meili_data
+
   ocai:
     build: .
+    depends_on:
+      - meilisearch
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
-      DATABASE_URL: ${DATABASE_URL}
+      MEILISEARCH_URL: http://meilisearch:7700
       TRANSCRIPT_API_TOKEN: ${TRANSCRIPT_API_TOKEN}
+      WEB_SUMMARY_API_TOKEN: ${WEB_SUMMARY_API_TOKEN}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+volumes:
+  meilisearch_data:
