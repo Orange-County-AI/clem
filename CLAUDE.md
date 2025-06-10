@@ -39,12 +39,12 @@ Each agent is configured in `clem.py` with specific instructions and model setti
 
 ## Database
 
-PostgreSQL database with three tables:
-- **messages**: Chat history (author, content, timestamp, channel_id, model)
+MeiliSearch search engine with three indices:
+- **messages**: Chat history (author, content, timestamp, channel_id, model) - optimized for full-text search
 - **karma**: User karma points (user_id, karma)
 - **channels**: Channel configuration (channel_id, disabled, verbosity_level)
 
-Database operations use the `dataset` library for SQL abstraction.
+Database operations use the `meilisearch` Python client for search and document storage.
 
 ## Key Implementation Details
 
@@ -62,11 +62,12 @@ Database operations use the `dataset` library for SQL abstraction.
 
 Required:
 - `BOT_TOKEN`: Discord bot token
-- `DATABASE_URL`: PostgreSQL connection string
 - `TRANSCRIPT_API_TOKEN`: For YouTube transcript API
 - `WEB_SUMMARY_API_TOKEN`: For web summary API
 
 Optional:
+- `MEILISEARCH_URL`: MeiliSearch server URL (default: http://localhost:7700)
+- `MEILISEARCH_API_KEY`: MeiliSearch API key for authentication
 - `MODEL`: LLM model to use
 - `SENTRY_DSN`: Error tracking
 - API keys: `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`

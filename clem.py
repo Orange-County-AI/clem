@@ -9,10 +9,11 @@ import os
 import re
 from datetime import UTC, datetime
 from enum import IntEnum
+import hashlib
 
-import dataset
 import discord
 import httpx
+import meilisearch
 from agents import Agent, Runner
 from agents.model_settings import ModelSettings
 from discord import Member
@@ -38,13 +39,184 @@ You primarily inhabit the Discord server for OC AI, a community of AI enthusiast
 """
 
 MODEL = os.getenv("MODEL", "gpt-4.1-mini")
-DATABASE_URL = os.getenv("DATABASE_URL")
+MEILISEARCH_URL = os.getenv("MEILISEARCH_URL", "http://localhost:7700")
+MEILISEARCH_API_KEY = os.getenv("MEILISEARCH_API_KEY")
 
-db = dataset.connect(DATABASE_URL)
+# Initialize MeiliSearch client
+client = meilisearch.Client(MEILISEARCH_URL, MEILISEARCH_API_KEY)
 
-messages_table = db["messages"]
-karma_table = db["karma"]
-channels_table = db["channels"]
+# Create indices
+messages_index = client.index("messages")
+karma_index = client.index("karma")
+channels_index = client.index("channels")
+
+# Configure searchable attributes for messages
+try:
+    messages_index.update_searchable_attributes(["content", "author"])
+    messages_index.update_filterable_attributes(["channel_id", "author", "timestamp"])
+    messages_index.update_sortable_attributes(["timestamp"])
+except Exception as e:
+    logger.info(f"Index configuration note: {e}")
+
+# Configure karma index
+try:
+    karma_index.update_filterable_attributes(["user_id"])
+    karma_index.update_sortable_attributes(["karma"])
+except Exception as e:
+    logger.info(f"Index configuration note: {e}")
+
+# Configure channels index
+try:
+    channels_index.update_filterable_attributes(["channel_id", "disabled", "verbosity_level"])
+except Exception as e:
+    logger.info(f"Index configuration note: {e}")
+
+
+# Helper functions for MeiliSearch operations
+def generate_message_id(author: str, timestamp: datetime, content: str) -> str:
+    """Generate a unique ID for a message"""
+    content_hash = hashlib.md5(f"{author}{timestamp.isoformat()}{content}".encode()).hexdigest()[:8]
+    return f"{int(timestamp.timestamp())}_{content_hash}"
+
+
+def store_message(author: str, content: str, channel_id: str, model: str = None):
+    """Store a message in MeiliSearch"""
+    timestamp = datetime.now(UTC)
+    doc = {
+        "id": generate_message_id(author, timestamp, content),
+        "author": author,
+        "content": content,
+        "timestamp": int(timestamp.timestamp()),
+        "channel_id": channel_id,
+    }
+    if model:
+        doc["model"] = model
+    
+    try:
+        messages_index.add_documents([doc])
+        return True
+    except Exception as e:
+        logger.error(f"Error storing message: {e}")
+        return False
+
+
+def get_channel_messages(channel_id: str, limit: int = 100):
+    """Get recent messages for a channel"""
+    try:
+        result = messages_index.search(
+            "",
+            {
+                "filter": f"channel_id = '{channel_id}'",
+                "sort": ["timestamp:desc"],
+                "limit": limit,
+            }
+        )
+        # Convert timestamp back to datetime and reverse order (oldest first)
+        messages = []
+        for hit in reversed(result["hits"]):
+            hit["timestamp"] = datetime.fromtimestamp(hit["timestamp"], UTC)
+            messages.append(hit)
+        return messages
+    except Exception as e:
+        logger.error(f"Error retrieving messages: {e}")
+        return []
+
+
+def get_user_karma(user_id: str) -> int:
+    """Get user's karma"""
+    try:
+        result = karma_index.search(
+            "",
+            {
+                "filter": f"user_id = '{user_id}'",
+                "limit": 1,
+            }
+        )
+        if result["hits"]:
+            return result["hits"][0]["karma"]
+        return 0
+    except Exception as e:
+        logger.error(f"Error retrieving karma: {e}")
+        return 0
+
+
+def update_user_karma(user_id: str, change: int) -> int:
+    """Update user's karma and return new total"""
+    current_karma = get_user_karma(user_id)
+    new_karma = current_karma + change
+    
+    doc = {
+        "id": user_id,
+        "user_id": user_id,
+        "karma": new_karma,
+    }
+    
+    try:
+        karma_index.add_documents([doc])
+        return new_karma
+    except Exception as e:
+        logger.error(f"Error updating karma: {e}")
+        return current_karma
+
+
+def get_channel_config(channel_id: str):
+    """Get channel configuration"""
+    try:
+        result = channels_index.search(
+            "",
+            {
+                "filter": f"channel_id = '{channel_id}'",
+                "limit": 1,
+            }
+        )
+        if result["hits"]:
+            return result["hits"][0]
+        return None
+    except Exception as e:
+        logger.error(f"Error retrieving channel config: {e}")
+        return None
+
+
+def update_channel_config(channel_id: str, disabled: bool = None, verbosity_level: int = None):
+    """Update channel configuration"""
+    current_config = get_channel_config(channel_id) or {}
+    
+    doc = {
+        "id": channel_id,
+        "channel_id": channel_id,
+        "disabled": disabled if disabled is not None else current_config.get("disabled", False),
+        "verbosity_level": verbosity_level if verbosity_level is not None else current_config.get("verbosity_level", 2),
+    }
+    
+    try:
+        channels_index.add_documents([doc])
+        return True
+    except Exception as e:
+        logger.error(f"Error updating channel config: {e}")
+        return False
+
+
+def delete_channel_messages(channel_id: str):
+    """Delete all messages for a channel"""
+    try:
+        # Get all message IDs for the channel
+        result = messages_index.search(
+            "",
+            {
+                "filter": f"channel_id = '{channel_id}'",
+                "limit": 10000,  # Adjust if needed
+                "attributesToRetrieve": ["id"]
+            }
+        )
+        
+        message_ids = [hit["id"] for hit in result["hits"]]
+        if message_ids:
+            messages_index.delete_documents(message_ids)
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting channel messages: {e}")
+        return False
+
 
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
@@ -85,12 +257,12 @@ class VerbosityLevel(IntEnum):
 
 
 def clem_disabled(channel_id: str) -> bool:
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     return channel and channel.get("disabled", False)
 
 
 def karma_only(channel_id: str) -> bool:
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     return (
         channel
         and channel.get("verbosity_level", VerbosityLevel.MENTIONED)
@@ -99,7 +271,7 @@ def karma_only(channel_id: str) -> bool:
 
 
 def get_verbosity_level(channel_id: str) -> VerbosityLevel:
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     return (
         VerbosityLevel(
             channel.get("verbosity_level", VerbosityLevel.MENTIONED)
@@ -319,16 +491,12 @@ async def on_message(message):
             content = content.replace(f"<@{user.id}>", f"@{user.name}")
             content = content.replace(f"<@!{user.id}>", f"@{user.name}")
 
-        row = {
-            "author": message.author.name,  # Store only the username
-            "content": content,
-            "timestamp": datetime.now(UTC),
-            "channel_id": channel_id,
-        }
-        if is_bot_message:
-            row["model"] = MODEL
-        messages_table.insert(row)
-        print("Message stored successfully")
+        model = MODEL if is_bot_message else None
+        success = store_message(message.author.name, content, channel_id, model)
+        if success:
+            print("Message stored successfully")
+        else:
+            print("Failed to store message")
     except Exception as e:
         print(f"Error storing message: {e}")
 
@@ -371,15 +539,7 @@ async def on_message(message):
             logger.error("Failed to get web page summary")
         return
 
-    chat_history = list(
-        messages_table.find(
-            channel_id=channel_id,
-            order_by=["-timestamp"],
-            _limit=100,
-        )
-    )
-
-    chat_history.reverse()
+    chat_history = get_channel_messages(channel_id, 100)
 
     # Format messages for context, using only usernames
     context = "\n".join(
@@ -460,16 +620,7 @@ def process_karma(content: str, mentions: list[Member]) -> dict[Member, int]:
 
 
 def update_karma(user_id: int, change: int) -> int:
-    user_karma = karma_table.find_one(user_id=str(user_id))
-    if user_karma:
-        new_karma = user_karma["karma"] + change
-        karma_table.update(
-            dict(user_id=str(user_id), karma=new_karma), ["user_id"]
-        )
-    else:
-        new_karma = change
-        karma_table.insert(dict(user_id=str(user_id), karma=new_karma))
-    return new_karma
+    return update_user_karma(str(user_id), change)
 
 
 @bot.event
@@ -500,13 +651,11 @@ def is_clementine_council():
 async def toggle_clem(ctx):
     channel_id = str(ctx.channel.id)
 
-    channel = channels_table.find_one(channel_id=channel_id)
+    channel = get_channel_config(channel_id)
     current_state = channel and channel.get("disabled", False)
     new_state = not current_state
 
-    channels_table.upsert(
-        dict(channel_id=channel_id, disabled=new_state), ["channel_id"]
-    )
+    update_channel_config(channel_id, disabled=new_state)
 
     status = "disabled" if new_state else "enabled"
     await ctx.send(f"Clem has been {status} in this channel.")
@@ -523,9 +672,7 @@ async def set_verbosity(ctx, level: int):
 
     channel_id = str(ctx.channel.id)
 
-    channels_table.upsert(
-        dict(channel_id=channel_id, verbosity_level=level), ["channel_id"]
-    )
+    update_channel_config(channel_id, verbosity_level=level)
 
     verbosity_descriptions = {
         1: "Karma changes only",
@@ -546,9 +693,12 @@ async def reset_chat(ctx):
     channel_id = str(ctx.channel.id)
 
     try:
-        messages_table.delete(channel_id=channel_id)
-        await ctx.send("Chat history for this channel has been reset.")
-        logger.info(f"Chat history reset for channel {channel_id}")
+        success = delete_channel_messages(channel_id)
+        if success:
+            await ctx.send("Chat history for this channel has been reset.")
+            logger.info(f"Chat history reset for channel {channel_id}")
+        else:
+            await ctx.send("An error occurred while resetting the chat history.")
     except Exception as e:
         await ctx.send("An error occurred while resetting the chat history.")
         logger.error(
